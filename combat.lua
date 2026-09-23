@@ -1052,112 +1052,103 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 function Combat:Init(Gui)
-    self.Gui = Gui
-    Gui:SetTabRebuild("Combat", function(g)
-        local scroll = g:CreateScrollContent()
-        local originalContent = g.Content
-        g.Content = scroll
-
-        local y = 0
-
-        y = g:CreateSection("Aimbot", y)
-        y = g:CreateToggle("Aimbot", Combat.Config.AimbotEnabled, function(state)
-            Combat.Config.AimbotEnabled = state
-        end, y)
-        y = g:CreateToggle("Toggle Mode", false, function(state)
-            Combat.Config.AimbotToggleMode = state
-        end, y)
-        y = CreateKeybindCapture(g, y)
-        y = g:CreateToggle("Team Check", Combat.Config.TeamCheck, function(state)
-            Combat.Config.TeamCheck = state
-        end, y)
-        y = g:CreateToggle("Wall Check", Combat.Config.WallCheck, function(state)
-            Combat.Config.WallCheck = state
-        end, y)
-        y = g:CreateSlider("FOV Radius", 10, 200, Combat.Config.FOV, function(val)
-            Combat.Config.FOV = val
-        end, y)
-
-        y = g:CreateSection("Silent Aim", y + 10)
-        y = g:CreateToggle("Enabled", Combat.Config.SilentAimEnabled, function(state)
-            Combat.Config.SilentAimEnabled = state
-            if state then
-                StartSilentAim()
-            end
-            UpdateFOVCircle()
-            if not state then
-                StopSilentAim()
-                SilentFOV_Circle.Visible = false
-            end
-        end, y)
-        y = g:CreateSlider("FOV Size", 50, 500, Combat.Config.SilentAimFOV, function(val)
-            Combat.Config.SilentAimFOV = val
-        end, y)
-        y = g:CreateDropdown("Hit Part", {"Head", "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}, Combat.Config.SilentAimHitPart, function(val)
-            Combat.Config.SilentAimHitPart = val
-        end, y)
-        y = g:CreateToggle("Random Hit Part", false, function(state)
-            if getgenv().__ToggleRandomHitPart then
-                getgenv().__ToggleRandomHitPart(state)
-            end
-        end, y)
-        y = g:CreateToggle("Show FOV Circle", showFOVCircle, function(state)
-            showFOVCircle = state
-            if getgenv().__ToggleFOVCircle then
-                getgenv().__ToggleFOVCircle(state)
-            end
-            UpdateFOVCircle()
-        end, y)
-
-        y = g:CreateSection("Hitbox Expander", y + 10)
-        y = g:CreateToggle("Hitbox Expander", Combat.Config.HitboxEnabled, function(state)
-            Combat.Config.HitboxEnabled = state
-            if not state then RestoreHitboxes() end
-        end, y)
-        y = g:CreateSlider("Body Hitbox Size", 5, 25, Combat.Config.HitboxSize, function(val)
-            Combat.Config.HitboxSize = val
-        end, y)
-        y = g:CreateSlider("HeadHB Size", 10, 30, Combat.Config.HeadHBSize, function(val)
-            Combat.Config.HeadHBSize = val
-        end, y)
-
-        y = g:CreateSection("Kill All", y + 10)
-        y = g:CreateToggle("Kill All", false, function(state)
-            SetKillAll(state)
-        end, y)
-
-        y = g:CreateSection("Hitsounds", y + 10)
-        y = g:CreateToggle("Enabled", false, function(state)
-            Combat.Config.HitsoundsEnabled = state
-        end, y)
-        local hitsoundNames = {"None", "Skeet.cc", "Neverlose", "Baimware", "Old Fatality", "Rust", "Bell", "TF2", "Among Us", "Fortnite Headshot", "Minecraft", "Osu", "TF2 Critical", "Bat", "Call of Duty", "Bruh", "Crowbar", "Weeb", "Steve"}
-        y = g:CreateDropdown("Sound", hitsoundNames, "Skeet.cc", function(val)
-            Combat.Config.Hitsound = val
-        end, y)
-        y = g:CreateSlider("Volume", 0, 10, 1, function(val)
-            Combat.Config.HitsoundVolume = val
-        end, y)
-
-        g.Content = originalContent
-    end)
-    return self
-end
-
-function Combat.new(deps)
-    local self = setmetatable({}, Combat)
-    self.Config = deps.Config or Combat.Config
-    self.Utils = deps.Utils
-    self.GUI = deps.GUI
-    self.Core = deps.Core
-    return self
-end
-
-function Combat:Init()
     print("[COMBAT] Init called")
-    -- Initialize silent aim if enabled
+    self.Gui = Gui
+
+    if Gui and Gui.SetTabRebuild then
+        Gui:SetTabRebuild("Combat", function(g)
+            local scroll = g:CreateScrollContent()
+            local originalContent = g.Content
+            g.Content = scroll
+
+            local y = 0
+
+            y = g:CreateSection("Aimbot", y)
+            y = g:CreateToggle("Aimbot", Combat.Config.AimbotEnabled, function(state)
+                Combat.Config.AimbotEnabled = state
+            end, y)
+            y = g:CreateToggle("Toggle Mode", false, function(state)
+                Combat.Config.AimbotToggleMode = state
+            end, y)
+            y = CreateKeybindCapture(g, y)
+            y = g:CreateToggle("Team Check", Combat.Config.TeamCheck, function(state)
+                Combat.Config.TeamCheck = state
+            end, y)
+            y = g:CreateToggle("Wall Check", Combat.Config.WallCheck, function(state)
+                Combat.Config.WallCheck = state
+            end, y)
+            y = g:CreateSlider("FOV Radius", 10, 200, Combat.Config.FOV, function(val)
+                Combat.Config.FOV = val
+            end, y)
+
+            y = g:CreateSection("Silent Aim", y + 10)
+            y = g:CreateToggle("Enabled", Combat.Config.SilentAimEnabled, function(state)
+                Combat.Config.SilentAimEnabled = state
+                if state then
+                    StartSilentAim()
+                end
+                UpdateFOVCircle()
+                if not state then
+                    StopSilentAim()
+                    SilentFOV_Circle.Visible = false
+                end
+            end, y)
+            y = g:CreateSlider("FOV Size", 50, 500, Combat.Config.SilentAimFOV, function(val)
+                Combat.Config.SilentAimFOV = val
+            end, y)
+            y = g:CreateDropdown("Hit Part", {"Head", "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}, Combat.Config.SilentAimHitPart, function(val)
+                Combat.Config.SilentAimHitPart = val
+            end, y)
+            y = g:CreateToggle("Random Hit Part", false, function(state)
+                if getgenv().__ToggleRandomHitPart then
+                    getgenv().__ToggleRandomHitPart(state)
+                end
+            end, y)
+            y = g:CreateToggle("Show FOV Circle", showFOVCircle, function(state)
+                showFOVCircle = state
+                if getgenv().__ToggleFOVCircle then
+                    getgenv().__ToggleFOVCircle(state)
+                end
+                UpdateFOVCircle()
+            end, y)
+
+            y = g:CreateSection("Hitbox Expander", y + 10)
+            y = g:CreateToggle("Hitbox Expander", Combat.Config.HitboxEnabled, function(state)
+                Combat.Config.HitboxEnabled = state
+                if not state then RestoreHitboxes() end
+            end, y)
+            y = g:CreateSlider("Body Hitbox Size", 5, 25, Combat.Config.HitboxSize, function(val)
+                Combat.Config.HitboxSize = val
+            end, y)
+            y = g:CreateSlider("HeadHB Size", 10, 30, Combat.Config.HeadHBSize, function(val)
+                Combat.Config.HeadHBSize = val
+            end, y)
+
+            y = g:CreateSection("Kill All", y + 10)
+            y = g:CreateToggle("Kill All", false, function(state)
+                SetKillAll(state)
+            end, y)
+
+            y = g:CreateSection("Hitsounds", y + 10)
+            y = g:CreateToggle("Enabled", false, function(state)
+                Combat.Config.HitsoundsEnabled = state
+            end, y)
+            local hitsoundNames = {"None", "Skeet.cc", "Neverlose", "Baimware", "Old Fatality", "Rust", "Bell", "TF2", "Among Us", "Fortnite Headshot", "Minecraft", "Osu", "TF2 Critical", "Bat", "Call of Duty", "Bruh", "Crowbar", "Weeb", "Steve"}
+            y = g:CreateDropdown("Sound", hitsoundNames, "Skeet.cc", function(val)
+                Combat.Config.Hitsound = val
+            end, y)
+            y = g:CreateSlider("Volume", 0, 10, 1, function(val)
+                Combat.Config.HitsoundVolume = val
+            end, y)
+
+            g.Content = originalContent
+        end)
+    end
+
     if self.Config.SilentAimEnabled then
         StartSilentAim()
     end
+    return self
 end
 
 function Combat:Update(dt)
