@@ -1103,10 +1103,6 @@ function Combat:Init(Gui)
                 getgenv().__MagicBulletConfig.TeamCheck = state
             end
         end, y)
-        y = g:CreateToggle("Team Check", true, function(state)
-            Combat.Config.TeamCheck = state
-        end, y)
-        end, y)
         y = g:CreateToggle("Body Hit Redirection", Combat.Config.BodyHitEnabled, function(state)
             Combat.Config.BodyHitEnabled = state
         end, y)
