@@ -1,3 +1,5 @@
+print("[COMBAT] Loading combat module...")
+
 local Combat = {}
 Combat.__index = Combat
 
