@@ -10,25 +10,25 @@ local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 --// Colors
-local BLACK      = Color3.fromRGB(2, 2, 2)
-local BACKGROUND = Color3.fromRGB(7, 7, 7)
-local DARK_PANEL = Color3.fromRGB(14, 14, 14)
-local RED        = Color3.fromRGB(145, 20, 25)
-local RED_BRIGHT = Color3.fromRGB(195, 28, 35)
-local RED_DARK   = Color3.fromRGB(70, 10, 13)
-local SELECTED   = Color3.fromRGB(45, 15, 17)
-local HOVER      = Color3.fromRGB(18, 7, 8)
+local BLACK      = Color3.fromRGB(9, 9, 9)
+local BACKGROUND = Color3.fromRGB(18, 18, 18)
+local DARK_PANEL = Color3.fromRGB(28, 28, 28)
+local RED        = Color3.fromRGB(110, 110, 110)
+local RED_BRIGHT = Color3.fromRGB(170, 170, 170)
+local RED_DARK   = Color3.fromRGB(78, 78, 78)
+local SELECTED   = Color3.fromRGB(48, 48, 48)
+local HOVER      = Color3.fromRGB(35, 35, 35)
 local WHITE      = Color3.fromRGB(255, 255, 255)
 local LIGHT      = Color3.fromRGB(225, 225, 225)
 local GRAY       = Color3.fromRGB(150, 150, 150)
-local BORDER     = Color3.fromRGB(65, 25, 27)
+local BORDER     = Color3.fromRGB(85, 85, 85)
 
 --// Wave Config
-local WAVE_COLOR        = Color3.fromRGB(255, 130, 130)
-local WAVE_PEAK_TRANS   = 0.82
-local WAVE_BAND_WIDTH   = 0.28
-local WAVE_DURATION     = 2.4
-local WAVE_PAUSE        = 1.0
+local WAVE_COLOR        = Color3.fromRGB(210, 210, 210)
+local WAVE_PEAK_TRANS   = 0.7
+local WAVE_BAND_WIDTH   = 0.25
+local WAVE_DURATION     = 2.7
+local WAVE_PAUSE        = 1.1
 local WAVE_ROTATION     = -45
 
 --// State

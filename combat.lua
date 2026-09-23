@@ -16,8 +16,10 @@ Combat.Config = {
     AimbotToggleMode = false,
     AimbotToggleKey = Enum.KeyCode.X,
     AimbotActive = false,
+    AimbotFOVVisible = true,
     SilentAimEnabled = false,
     SilentAimFOV = 150,
+    SilentAimFOVVisible = true,
     SilentAimHitPart = "Head",
     SilentAimPrediction = false,
     HitboxEnabled = false,
@@ -53,6 +55,21 @@ SilentFOV_Circle.NumSides = 100
 SilentFOV_Circle.Transparency = 0.5
 SilentFOV_Circle.Radius = 150
 SilentFOV_Circle.Visible = false
+
+local function UpdateFOVCircle()
+    if not FOV_Circle or not SilentFOV_Circle then return end
+
+    local mousePos = UserInputService:GetMouseLocation()
+    FOV_Circle.Position = Vector2.new(mousePos.X, mousePos.Y)
+    FOV_Circle.Radius = Combat.Config.FOV
+    FOV_Circle.Visible = Combat.Config.AimbotEnabled and (Combat.Config.AimbotFOVVisible ~= false)
+
+    if Camera and Camera.ViewportSize then
+        SilentFOV_Circle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    end
+    SilentFOV_Circle.Radius = Combat.Config.SilentAimFOV
+    SilentFOV_Circle.Visible = Combat.Config.SilentAimEnabled and (Combat.Config.SilentAimFOVVisible ~= false)
+end
 
 local function IsVisible(targetPart)
     if not Combat.Config.WallCheck then return true end
@@ -300,13 +317,7 @@ end)
 
 --// Main render loop
 RunService.RenderStepped:Connect(function()
-    local mousePos = UserInputService:GetMouseLocation()
-    FOV_Circle.Position = Vector2.new(mousePos.X, mousePos.Y)
-    FOV_Circle.Radius = Combat.Config.FOV
-    FOV_Circle.Visible = Combat.Config.AimbotEnabled
-    SilentFOV_Circle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    SilentFOV_Circle.Radius = Combat.Config.SilentAimFOV
-    SilentFOV_Circle.Visible = Combat.Config.SilentAimEnabled
+    UpdateFOVCircle()
 
     getgenv().__SilentAimConfig = {
         Enabled = Combat.Config.SilentAimEnabled,
@@ -637,6 +648,7 @@ function Combat:Init(Gui)
         local y = g:CreateSection("Aimbot", 0)
         y = g:CreateToggle("Aimbot", Combat.Config.AimbotEnabled, function(state)
             Combat.Config.AimbotEnabled = state
+            UpdateFOVCircle()
         end, y)
         y = g:CreateToggle("Toggle Mode", false, function(state)
             Combat.Config.AimbotToggleMode = state
@@ -650,6 +662,11 @@ function Combat:Init(Gui)
         end, y)
         y = g:CreateSlider("FOV Radius", 10, 200, Combat.Config.FOV, function(val)
             Combat.Config.FOV = val
+            UpdateFOVCircle()
+        end, y)
+        y = g:CreateToggle("Show Aimbot FOV", Combat.Config.AimbotFOVVisible, function(state)
+            Combat.Config.AimbotFOVVisible = state
+            UpdateFOVCircle()
         end, y)
 
         y = g:CreateSection("Silent Aim", y + 10)
@@ -660,15 +677,21 @@ function Combat:Init(Gui)
             else
                 StopSilentAim()
             end
+            UpdateFOVCircle()
         end, y)
         y = g:CreateSlider("Silent Aim FOV", 50, 500, Combat.Config.SilentAimFOV, function(val)
             Combat.Config.SilentAimFOV = val
+            UpdateFOVCircle()
         end, y)
         y = g:CreateDropdown("Hit Part", {"Head", "HumanoidRootPart"}, Combat.Config.SilentAimHitPart, function(val)
             Combat.Config.SilentAimHitPart = val
         end, y)
         y = g:CreateToggle("Prediction", Combat.Config.SilentAimPrediction, function(state)
             Combat.Config.SilentAimPrediction = state
+        end, y)
+        y = g:CreateToggle("Show Silent FOV", Combat.Config.SilentAimFOVVisible, function(state)
+            Combat.Config.SilentAimFOVVisible = state
+            UpdateFOVCircle()
         end, y)
         y = g:CreateToggle("Body Hit Redirection", Combat.Config.BodyHitEnabled, function(state)
             Combat.Config.BodyHitEnabled = state
