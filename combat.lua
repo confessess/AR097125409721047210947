@@ -1041,7 +1041,9 @@ function Combat:Init(Gui)
         local originalContent = g.Content
         g.Content = scroll
 
-        local y = g:CreateSection("Aimbot", 0)
+        local y = 0
+
+        y = g:CreateSection("Aimbot", y)
         y = g:CreateToggle("Aimbot", Combat.Config.AimbotEnabled, function(state)
             Combat.Config.AimbotEnabled = state
         end, y)
@@ -1059,7 +1061,7 @@ function Combat:Init(Gui)
             Combat.Config.FOV = val
         end, y)
 
-        y = g:CreateSection("Silent Aim (FOV HBE)", y + 10)
+        y = g:CreateSection("Silent Aim", y + 10)
         y = g:CreateToggle("Enabled", Combat.Config.SilentAimEnabled, function(state)
             Combat.Config.SilentAimEnabled = state
             if state then
@@ -1083,31 +1085,6 @@ function Combat:Init(Gui)
             if getgenv().__ToggleFOVCircle then
                 getgenv().__ToggleFOVCircle(state)
             end
-        end, y)
-
-        -- MAGIC BULLET SECTION
-        y = g:CreateSection("Magic Bullet (RAGE)", y + 10)
-        y = g:CreateToggle("Enabled", false, function(state)
-            if getgenv().__MagicBulletConfig then
-                getgenv().__MagicBulletConfig.Enabled = state
-                print("[ENI] Magic Bullet: " .. (state and "ON" or "OFF"))
-            end
-        end, y)
-        y = g:CreateSlider("Hitbox Size", 10, 100, 50, function(val)
-            if getgenv().__MagicBulletConfig then
-                getgenv().__MagicBulletConfig.Size = val
-            end
-        end, y)
-        y = g:CreateToggle("Team Check", true, function(state)
-            if getgenv().__MagicBulletConfig then
-                getgenv().__MagicBulletConfig.TeamCheck = state
-            end
-        end, y)
-        y = g:CreateToggle("Body Hit Redirection", Combat.Config.BodyHitEnabled, function(state)
-            Combat.Config.BodyHitEnabled = state
-        end, y)
-        y = g:CreateSlider("Body Hit Chance %", 0, 100, Combat.Config.BodyHitChance, function(val)
-            Combat.Config.BodyHitChance = val
         end, y)
 
         y = g:CreateSection("Hitbox Expander", y + 10)
