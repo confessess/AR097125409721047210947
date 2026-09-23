@@ -569,7 +569,12 @@ end
 
 function Gui:SetTabRebuild(name, callback)
     local tab = self:GetTab(name)
-    if tab then tab.Rebuild = callback end
+    if tab then
+        tab.Rebuild = callback
+        if self.CurrentTab == name then
+            self:SwitchTab(name)
+        end
+    end
 end
 
 function Gui:CreateScrollContent()
