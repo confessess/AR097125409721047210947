@@ -1,12 +1,30 @@
-local BASE = "https://raw.githubusercontent.com/confessess/AR097125409721047210947/refs/heads/main/main.lua"
+local function loadModule(name)
+    if script and script.Parent then
+        local moduleObject = script.Parent:FindFirstChild(name)
+        if moduleObject then
+            return require(moduleObject)
+        end
+    end
 
-local GuiModule = loadstring(game:HttpGet(BASE .. "gui.lua"))()
-local CombatModule = loadstring(game:HttpGet(BASE .. "combat.lua"))()
-local ESPModule = loadstring(game:HttpGet(BASE .. "esp.lua"))()
-local GunModsModule = loadstring(game:HttpGet(BASE .. "gunmods.lua"))()
-local MovementModule = loadstring(game:HttpGet(BASE .. "movement.lua"))()
-local WorldModule = loadstring(game:HttpGet(BASE .. "world.lua"))()
-local SkinChangerModule = loadstring(game:HttpGet(BASE .. "skinchanger.lua"))()
+    local BASE = "https://raw.githubusercontent.com/confessess/AR097125409721047210947/main/"
+    local ok, result = pcall(function()
+        return loadstring(game:HttpGet(BASE .. name .. ".lua"))()
+    end)
+
+    if not ok then
+        error("Failed to load module " .. name .. ": " .. tostring(result))
+    end
+
+    return result
+end
+
+local GuiModule = loadModule("gui")
+local CombatModule = loadModule("combat")
+local ESPModule = loadModule("esp")
+local GunModsModule = loadModule("gunmods")
+local MovementModule = loadModule("movement")
+local WorldModule = loadModule("world")
+local SkinChangerModule = loadModule("skinchanger")
 
 local Gui = GuiModule:Init()
 
@@ -70,7 +88,7 @@ local function SaveConfig()
         Movement = SerializeConfig(MovementModule.Config),
     }
 
-    local json = game:GetService("Service"):JSONEncode(allConfigs)
+    local json = game:GetService("HttpService"):JSONEncode(allConfigs)
 
     if writefile then
         pcall(function()
