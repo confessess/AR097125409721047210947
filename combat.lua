@@ -208,11 +208,10 @@ local function StartSilentAim()
         return part
     end
 
-    local function GetTargetInFOV()
+    local function GetTargetClosestToMouse()
         local closest = nil
         local closestDist = math.huge
-        local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-        local fov = config.FOV or 150
+        local mousePos = UserInputService:GetMouseLocation()
 
         for _, plr in ipairs(Players:GetPlayers()) do
             if not IsValidTarget(plr) then continue end
@@ -227,8 +226,10 @@ local function StartSilentAim()
 
             local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
             if not onScreen then continue end
-            local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
-            if dist < closestDist and dist < fov then
+
+            -- Distance from MOUSE (not screen center)
+            local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+            if dist < closestDist then
                 closestDist = dist
                 closest = {
                     player = plr,
@@ -337,12 +338,15 @@ local function StartSilentAim()
             return
         end
 
+        -- Update FOV circle
+        UpdateFOVCircle()
+
         local now = tick()
         if now - lastUpdate < UPDATE_INTERVAL then return end
         lastUpdate = now
 
-        -- Get best target in FOV with LOS
-        local newTarget = GetTargetInFOV()
+        -- Get best target closest to mouse with LOS
+        local newTarget = GetTargetClosestToMouse()
 
         -- Check if target changed or became invalid
         local shouldRestore = false
@@ -406,6 +410,12 @@ local function StartSilentAim()
             expandedParts = {}
         end
     end)
+
+    -- Expose FOV circle toggle
+    getgenv().__ToggleFOVCircle = function(enabled)
+        showFOVCircle = enabled
+        print("[ENI] FOV Circle: " .. (enabled and "ON" or "OFF"))
+    end
 
     -- Expose random hit part toggle
     getgenv().__ToggleRandomHitPart = function(enabled)
@@ -828,6 +838,11 @@ function Combat:Init(Gui)
         y = g:CreateToggle("Random Hit Part", false, function(state)
             if getgenv().__ToggleRandomHitPart then
                 getgenv().__ToggleRandomHitPart(state)
+            end
+        end, y)
+        y = g:CreateToggle("Show FOV Circle", false, function(state)
+            if getgenv().__ToggleFOVCircle then
+                getgenv().__ToggleFOVCircle(state)
             end
         end, y)
         y = g:CreateToggle("Team Check", true, function(state)
