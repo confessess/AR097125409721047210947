@@ -126,6 +126,27 @@ local function StartSilentAim()
     if SilentAimRunning then return end
     SilentAimRunning = true
 
+    -- PATCHED: Find the Raycast function with new signature
+    local RaycastFunction = nil
+    for _, v in pairs(getgc()) do
+        if type(v) == "function" and islclosure(v) then
+            local name = debug.info(v, "n")
+            local consts = debug.getconstants(v)
+            if name == "Raycast" and #consts == 7 and consts[1] == "FindPartOnRayWithIgnoreList" then
+                RaycastFunction = v
+                break
+            end
+        end
+    end
+
+    if not RaycastFunction then
+        warn("[ENI] Could not find Raycast function")
+        SilentAimRunning = false
+        return
+    end
+
+    print("[ENI] Found Raycast function, hooking...")
+
     local actor = getactors and getactors()[1]
     if not actor then
         warn("[ENI] No actor found for silent aim")
@@ -236,34 +257,45 @@ local function StartSilentAim()
             target = GetClosestPlayer()
         end)
 
-        for i, v in pairs(getgc()) do
+        -- PATCHED: Hook the Raycast function directly
+        local RaycastFunction = nil
+        for _, v in pairs(getgc()) do
             if type(v) == "function" and islclosure(v) then
-                if debug.info(v, "a") == 2 and #debug.getupvalues(v) == 2 and #debug.getconstants(v) == 17 and debug.info(v, "n"):len() <= 10 then
-                    local old
-                    old = hookfunction(v, function(p1, p2)
-                        if target and target.Position and config.Enabled ~= false then
-                            local mychar = LocalPlayer.Character
-                            if mychar then
-                                local head = mychar:FindFirstChild("Head")
-                                if head then
-                                    local aimPos = target.Position
-                                    if config.Prediction then
-                                        local velocity = target.AssemblyLinearVelocity or Vector3.new()
-                                        local distance = (target.Position - Camera.CFrame.Position).Magnitude
-                                        local bulletSpeed = 3000
-                                        local travelTime = distance / bulletSpeed
-                                        local ping = LocalPlayer:GetNetworkPing() or 0
-                                        aimPos = target.Position + (velocity * (travelTime + ping * 0.5))
-                                    end
-                                    local direction = (aimPos - head.Position)
-                                    p1 = Ray.new(head.Position, direction)
-                                end
-                            end
-                        end
-                        return old(p1, p2)
-                    end)
+                local name = debug.info(v, "n")
+                local consts = debug.getconstants(v)
+                if name == "Raycast" and #consts == 7 and consts[1] == "FindPartOnRayWithIgnoreList" then
+                    RaycastFunction = v
+                    break
                 end
             end
+        end
+
+        if RaycastFunction then
+            local old
+            old = hookfunction(RaycastFunction, function(ray, ignoreList, ...)
+                if target and target.Position and config.Enabled ~= false then
+                    local aimPos = target.Position
+                    if config.Prediction then
+                        local velocity = target.AssemblyLinearVelocity or Vector3.new()
+                        local distance = (target.Position - Camera.CFrame.Position).Magnitude
+                        local bulletSpeed = 3000
+                        local travelTime = distance / bulletSpeed
+                        local ping = LocalPlayer:GetNetworkPing() or 0
+                        aimPos = target.Position + (velocity * (travelTime + ping * 0.5))
+                    end
+
+                    -- Create new ray pointing at target
+                    local origin = ray.Origin
+                    local direction = (aimPos - origin).Unit * (aimPos - origin).Magnitude
+                    local newRay = Ray.new(origin, direction)
+
+                    return old(newRay, ignoreList, ...)
+                end
+                return old(ray, ignoreList, ...)
+            end)
+            print("[ENI] Silent aim hooked successfully!")
+        else
+            warn("[ENI] Raycast function not found in actor")
         end
     ]=])
 end
