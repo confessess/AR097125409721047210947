@@ -126,7 +126,7 @@ local function StartSilentAim()
     if SilentAimRunning then return end
     SilentAimRunning = true
 
-    print("[ENI] Starting Dynamic FOV HBE...")
+    print("[ENI] Starting Dynamic FOV HBE with Hit Part Selection...")
 
     -- Store config in globals
     getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
@@ -135,7 +135,14 @@ local function StartSilentAim()
     -- State
     local currentTarget = nil
     local currentTargetChar = nil
+    local currentHitPart = nil
     local expandedParts = {}
+    local randomHitPartEnabled = false
+    local randomCycleTimer = 0
+    local RANDOM_CYCLE_INTERVAL = 0.1  -- Cycle every 100ms
+
+    -- Available hit parts for random mode
+    local HIT_PARTS = {"Head", "UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}
 
     -- Helper functions
     local function IsValidTarget(plr)
@@ -170,8 +177,35 @@ local function StartSilentAim()
         params.FilterDescendantsInstances = {LocalPlayer.Character, targetPart.Parent}
         params.IgnoreWater = true
         local result = Workspace:Raycast(origin, direction, params)
-        -- If no hit or hit is part of target, we have LOS
         return not result or result.Instance:IsDescendantOf(targetPart.Parent)
+    end
+
+    local function GetHitPart(char)
+        if not char then return nil end
+
+        -- Random mode: pick random part
+        if randomHitPartEnabled then
+            -- Filter to parts that exist on this character
+            local availableParts = {}
+            for _, partName in ipairs(HIT_PARTS) do
+                local part = char:FindFirstChild(partName)
+                if part and part:IsA("BasePart") then
+                    table.insert(availableParts, part)
+                end
+            end
+            if #availableParts > 0 then
+                return availableParts[math.random(1, #availableParts)]
+            end
+        end
+
+        -- Normal mode: use selected hit part
+        local hitPartName = config.HitPart or "Head"
+        local part = char:FindFirstChild(hitPartName)
+        if not part then
+            -- Fallback to Head if selected part doesn't exist
+            part = char:FindFirstChild("Head")
+        end
+        return part
     end
 
     local function GetTargetInFOV()
@@ -179,13 +213,13 @@ local function StartSilentAim()
         local closestDist = math.huge
         local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
         local fov = config.FOV or 150
-        local hitPartName = config.HitPart or "Head"
 
         for _, plr in ipairs(Players:GetPlayers()) do
             if not IsValidTarget(plr) then continue end
             local char = plr.Character
-            local targetPart = char:FindFirstChild(hitPartName)
-            if not targetPart then targetPart = char:FindFirstChild("Head") end
+
+            -- Get hit part (respects random mode)
+            local targetPart = GetHitPart(char)
             if not targetPart then continue end
 
             -- Must have line of sight
@@ -199,6 +233,7 @@ local function StartSilentAim()
                 closest = {
                     player = plr,
                     part = targetPart,
+                    character = char,
                     distance = dist,
                     screenPos = screenPos
                 }
@@ -207,69 +242,97 @@ local function StartSilentAim()
         return closest
     end
 
-    local function RestoreHitbox(char)
-        if not char then return end
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                local originalSize = part:GetAttribute("OriginalSize")
-                local originalTransp = part:GetAttribute("OriginalTransparency")
-                if originalSize then
-                    part.Size = originalSize
-                    part.Transparency = originalTransp or 0
-                    part:SetAttribute("OriginalSize", nil)
-                    part:SetAttribute("OriginalTransparency", nil)
-                end
-            end
-        end
-    end
+-- RestoreHitbox now included in ExpandHitboxToFOV section above
+
+    -- Use EXACT SAME method as working HBE
+    local OriginalData = {}
 
     local function ExpandHitboxToFOV(targetData)
         if not targetData or not targetData.part then return end
-        local char = targetData.part.Parent
+        local char = targetData.character
         if not char then return end
 
-        -- Calculate expansion size based on distance and FOV
-        -- Closer = bigger expansion, Farther = smaller
+        -- Calculate expansion size based on distance (FOV-based)
         local distance = (targetData.part.Position - Camera.CFrame.Position).Magnitude
         local fov = config.FOV or 150
 
-        -- Base size on FOV and distance
-        -- At close range, expand to fill more of FOV
-        local baseSize = math.clamp(distance * 0.5, 5, 20)
+        -- Scale size based on distance - closer = bigger
+        local baseSize = math.clamp(distance * (fov / 100), 5, 25)
 
-        -- Expand all hitbox parts
-        local hitboxParts = {"Head", "UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"}
-        for _, partName in ipairs(hitboxParts) do
+        -- Use SAME parts as working HBE
+        local partsToExpand = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart"}
+
+        -- Also expand the selected hit part if it's different
+        local selectedPartName = targetData.part.Name
+        if not table.find(partsToExpand, selectedPartName) then
+            table.insert(partsToExpand, selectedPartName)
+        end
+
+        for _, partName in ipairs(partsToExpand) do
             local part = char:FindFirstChild(partName)
             if part and part:IsA("BasePart") then
-                -- Store original if not already stored
-                if not part:GetAttribute("OriginalSize") then
-                    part:SetAttribute("OriginalSize", part.Size)
-                    part:SetAttribute("OriginalTransparency", part.Transparency)
+                -- Store original using SAME method as working HBE
+                if not OriginalData[part] then
+                    OriginalData[part] = {Size = part.Size, Transparency = part.Transparency}
                 end
 
-                -- Expand to fill FOV
-                part.Size = Vector3.new(baseSize, baseSize, baseSize)
-                part.Transparency = 0.7  -- Semi-transparent so you can see them
-                part.CanCollide = false
+                -- Use SAME expansion method
+                local targetSize = (partName == "HeadHB") and
+                    Vector3.new(baseSize * 1.5, baseSize * 1.5, baseSize * 1.5) or
+                    Vector3.new(baseSize, baseSize, baseSize)
+
+                part.Size = targetSize
+                part.Transparency = 1  -- SAME as working HBE (invisible)
 
                 table.insert(expandedParts, part)
             end
         end
+
+        currentHitPart = targetData.part
+    end
+
+    local function RestoreHitbox(char)
+        -- Use SAME restore method as working HBE
+        for part, data in pairs(OriginalData) do
+            if part and part.Parent then
+                part.Size = data.Size
+                part.Transparency = data.Transparency
+            end
+        end
+        OriginalData = {}
+        expandedParts = {}
     end
 
     -- Main update loop
     local lastUpdate = 0
-    local UPDATE_INTERVAL = 0.05  -- Update every 50ms for responsiveness
+    local UPDATE_INTERVAL = 0.05
 
-    RunService.RenderStepped:Connect(function()
+    RunService.RenderStepped:Connect(function(dt)
+        -- Random hit part cycling
+        if randomHitPartEnabled then
+            randomCycleTimer = randomCycleTimer + dt
+            if randomCycleTimer >= RANDOM_CYCLE_INTERVAL then
+                randomCycleTimer = 0
+                -- Force re-scan with new random part
+                if currentTarget then
+                    -- Restore old
+                    RestoreHitbox(currentTargetChar)
+                    expandedParts = {}
+                    -- Will re-expand with new random part on next update
+                    currentTarget = nil
+                    currentTargetChar = nil
+                end
+            end
+        end
+
         -- Check if enabled
         if config.Enabled == false then
-            -- Restore current target if exists
             if currentTargetChar then
                 RestoreHitbox(currentTargetChar)
                 currentTargetChar = nil
                 currentTarget = nil
+                currentHitPart = nil
+                expandedParts = {}
             end
             return
         end
@@ -286,12 +349,10 @@ local function StartSilentAim()
         local shouldExpand = false
 
         if currentTarget and (not newTarget or newTarget.player ~= currentTarget.player) then
-            -- Target changed or lost
             shouldRestore = true
         end
 
         if newTarget and (not currentTarget or newTarget.player ~= currentTarget.player) then
-            -- New target
             shouldExpand = true
         end
 
@@ -300,29 +361,34 @@ local function StartSilentAim()
             RestoreHitbox(currentTargetChar)
             currentTargetChar = nil
             currentTarget = nil
+            currentHitPart = nil
             expandedParts = {}
         end
 
         -- Expand new target if needed
         if shouldExpand and newTarget then
             currentTarget = newTarget
-            currentTargetChar = newTarget.part.Parent
+            currentTargetChar = newTarget.character
             ExpandHitboxToFOV(newTarget)
+
+            if randomHitPartEnabled then
+                print("[ENI] Target: " .. newTarget.player.Name .. " | Hit Part: " .. newTarget.part.Name)
+            end
         end
 
-        -- If we have a target, verify it's still valid
+        -- Verify current target still valid
         if currentTarget then
-            -- Check if still valid
             if not IsValidTarget(currentTarget.player) then
                 RestoreHitbox(currentTargetChar)
                 currentTarget = nil
                 currentTargetChar = nil
+                currentHitPart = nil
                 expandedParts = {}
-            -- Check if still has LOS
             elseif not HasLineOfSight(currentTarget.part) then
                 RestoreHitbox(currentTargetChar)
                 currentTarget = nil
                 currentTargetChar = nil
+                currentHitPart = nil
                 expandedParts = {}
             end
         end
@@ -336,14 +402,28 @@ local function StartSilentAim()
             end
             currentTarget = nil
             currentTargetChar = nil
+            currentHitPart = nil
             expandedParts = {}
         end
     end)
 
+    -- Expose random hit part toggle
+    getgenv().__ToggleRandomHitPart = function(enabled)
+        randomHitPartEnabled = enabled
+        print("[ENI] Random Hit Part: " .. (enabled and "ON" or "OFF"))
+        -- Force re-scan
+        if currentTargetChar then
+            RestoreHitbox(currentTargetChar)
+        end
+        currentTarget = nil
+        currentTargetChar = nil
+        currentHitPart = nil
+        expandedParts = {}
+    end
+
     print("[ENI] Dynamic FOV HBE active!")
-    print("[ENI] - Expands target hitbox to fill FOV")
-    print("[ENI] - Only when target is visible (no wallbang)")
-    print("[ENI] - Restores when target changes or invalid")
+    print("[ENI] - Hit Part: " .. tostring(config.HitPart or "Head"))
+    print("[ENI] - Random Hit Part available via __ToggleRandomHitPart")
 end
 
 local function StopSilentAim()
