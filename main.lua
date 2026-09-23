@@ -1,7 +1,20 @@
+local function debugLog(prefix, ...)
+    local args = { ... }
+    local text = ""
+    for i, v in ipairs(args) do
+        if i > 1 then text = text .. " " end
+        text = text .. tostring(v)
+    end
+    print("[" .. prefix .. "] " .. text)
+end
+
 local function loadModule(name)
+    debugLog("BOOT", "Loading module:", name)
+
     if script and script.Parent then
         local moduleObject = script.Parent:FindFirstChild(name)
         if moduleObject then
+            debugLog("BOOT", "Using local module:", name, "@", moduleObject:GetFullName())
             return require(moduleObject)
         end
     end
@@ -15,9 +28,11 @@ local function loadModule(name)
         error("Failed to load module " .. name .. ": " .. tostring(result))
     end
 
+    debugLog("BOOT", "Loaded remote module:", name)
     return result
 end
 
+print("[BOOT] Starting bootstrap")
 local GuiModule = loadModule("gui")
 local CombatModule = loadModule("combat")
 local ESPModule = loadModule("esp")
@@ -26,7 +41,17 @@ local MovementModule = loadModule("movement")
 local WorldModule = loadModule("world")
 local SkinChangerModule = loadModule("skinchanger")
 
+print("[BOOT] Module states:", type(GuiModule), type(CombatModule), type(ESPModule), type(GunModsModule), type(MovementModule), type(WorldModule), type(SkinChangerModule))
+if not GuiModule then error("GuiModule is nil after loadModule('gui')") end
+if not CombatModule then error("CombatModule is nil after loadModule('combat')") end
+if not ESPModule then error("ESPModule is nil after loadModule('esp')") end
+if not GunModsModule then error("GunModsModule is nil after loadModule('gunmods')") end
+if not MovementModule then error("MovementModule is nil after loadModule('movement')") end
+if not WorldModule then error("WorldModule is nil after loadModule('world')") end
+if not SkinChangerModule then error("SkinChangerModule is nil after loadModule('skinchanger')") end
+
 local Gui = GuiModule:Init()
+print("[BOOT] GUI created")
 
 Gui:CreateTab("Combat", "Aimbot, silent aim, hitbox, kill all.")
 Gui:CreateTab("Visuals", "ESP and world rendering.")
@@ -35,13 +60,16 @@ Gui:CreateTab("Movement", "Speed, jump, and fly settings.")
 Gui:CreateTab("Skin Changer", "Announcers, arms, and melee skins.")
 Gui:CreateTab("World", "World modifications.")
 Gui:CreateTab("Settings", "GUI preferences, keybinds, configs.")
+print("[BOOT] Modules initialized")
 
+print("[BOOT] Initializing modules")
 CombatModule:Init(Gui)
 ESPModule:Init(Gui)
 GunModsModule:Init(Gui)
 MovementModule:Init(Gui)
 WorldModule:Init(Gui)
 SkinChangerModule:Init(Gui)
+print("[BOOT] Modules initialized")
 
 --// CONFIG SYSTEM — automatic save/load
 local CONFIG_PATH = "blackout_config.json"

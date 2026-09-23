@@ -16,17 +16,16 @@ Combat.Config = {
     AimbotToggleMode = false,
     AimbotToggleKey = Enum.KeyCode.X,
     AimbotActive = false,
+    AimbotFOVVisible = true,
     SilentAimEnabled = false,
     SilentAimFOV = 150,
+    SilentAimFOVVisible = true,
     SilentAimHitPart = "Head",
     SilentAimPrediction = false,
-    HitboxEnabled = false,
     TeamCheck = true,
     WallCheck = false,
     FOV = 25,
     HitPart = "Head",
-    HitboxSize = 13,
-    HeadHBSize = 20,
     AimKey = Enum.UserInputType.MouseButton2,
     KillAll = false,
     HitsoundsEnabled = false,
@@ -53,6 +52,21 @@ SilentFOV_Circle.NumSides = 100
 SilentFOV_Circle.Transparency = 0.5
 SilentFOV_Circle.Radius = 150
 SilentFOV_Circle.Visible = false
+
+local function UpdateFOVCircle()
+    if not FOV_Circle or not SilentFOV_Circle then return end
+
+    local mousePos = UserInputService:GetMouseLocation()
+    FOV_Circle.Position = Vector2.new(mousePos.X, mousePos.Y)
+    FOV_Circle.Radius = Combat.Config.FOV
+    FOV_Circle.Visible = Combat.Config.AimbotEnabled and (Combat.Config.AimbotFOVVisible ~= false)
+
+    if Camera and Camera.ViewportSize then
+        SilentFOV_Circle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    end
+    SilentFOV_Circle.Radius = Combat.Config.SilentAimFOV
+    SilentFOV_Circle.Visible = Combat.Config.SilentAimEnabled and (Combat.Config.SilentAimFOVVisible ~= false)
+end
 
 local function IsVisible(targetPart)
     if not Combat.Config.WallCheck then return true end
@@ -303,10 +317,10 @@ RunService.RenderStepped:Connect(function()
     local mousePos = UserInputService:GetMouseLocation()
     FOV_Circle.Position = Vector2.new(mousePos.X, mousePos.Y)
     FOV_Circle.Radius = Combat.Config.FOV
-    FOV_Circle.Visible = Combat.Config.AimbotEnabled
+    FOV_Circle.Visible = Combat.Config.AimbotEnabled and (Combat.Config.AimbotFOVVisible ~= false)
     SilentFOV_Circle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     SilentFOV_Circle.Radius = Combat.Config.SilentAimFOV
-    SilentFOV_Circle.Visible = Combat.Config.SilentAimEnabled
+    SilentFOV_Circle.Visible = Combat.Config.SilentAimEnabled and (Combat.Config.SilentAimFOVVisible ~= false)
 
     getgenv().__SilentAimConfig = {
         Enabled = Combat.Config.SilentAimEnabled,
@@ -339,55 +353,6 @@ RunService.RenderStepped:Connect(function()
     end
 
 end)
-
---// Hitbox Expander
-local OriginalData = {}
-
-local function ExpandHitboxes()
-    if not Combat.Config.HitboxEnabled then return end
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LocalPlayer then continue end
-        if Combat.Config.TeamCheck and plr.Team == LocalPlayer.Team then continue end
-        local char = plr.Character
-        if not char then continue end
-        local partsToExpand = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart"}
-        for _, partName in ipairs(partsToExpand) do
-            local part = char:FindFirstChild(partName)
-            if part and part:IsA("BasePart") then
-                if not OriginalData[part] then
-                    OriginalData[part] = {Size = part.Size, Transparency = part.Transparency}
-                end
-                local targetSize = (partName == "HeadHB") and
-                    Vector3.new(Combat.Config.HeadHBSize, Combat.Config.HeadHBSize, Combat.Config.HeadHBSize) or
-                    Vector3.new(Combat.Config.HitboxSize, Combat.Config.HitboxSize, Combat.Config.HitboxSize)
-                part.Size = targetSize
-                part.Transparency = 1
-            end
-        end
-    end
-end
-
-local function RestoreHitboxes()
-    for part, data in pairs(OriginalData) do
-        if part and part.Parent then
-            part.Size = data.Size
-            part.Transparency = data.Transparency
-        end
-    end
-    OriginalData = {}
-end
-
-RunService.RenderStepped:Connect(function()
-    if Combat.Config.HitboxEnabled then
-        ExpandHitboxes()
-    else
-        RestoreHitboxes()
-    end
-end)
-
-Players.PlayerRemoving:Connect(function(plr)
-    if plr.Character then
-        for _, part in ipairs(plr.Character:GetDescendants()) do
             if OriginalData[part] then OriginalData[part] = nil end
         end
     end
@@ -637,6 +602,7 @@ function Combat:Init(Gui)
         local y = g:CreateSection("Aimbot", 0)
         y = g:CreateToggle("Aimbot", Combat.Config.AimbotEnabled, function(state)
             Combat.Config.AimbotEnabled = state
+            UpdateFOVCircle()
         end, y)
         y = g:CreateToggle("Toggle Mode", false, function(state)
             Combat.Config.AimbotToggleMode = state
@@ -650,6 +616,11 @@ function Combat:Init(Gui)
         end, y)
         y = g:CreateSlider("FOV Radius", 10, 200, Combat.Config.FOV, function(val)
             Combat.Config.FOV = val
+            UpdateFOVCircle()
+        end, y)
+        y = g:CreateToggle("Show Aimbot FOV", Combat.Config.AimbotFOVVisible, function(state)
+            Combat.Config.AimbotFOVVisible = state
+            UpdateFOVCircle()
         end, y)
 
         y = g:CreateSection("Silent Aim", y + 10)
@@ -660,9 +631,11 @@ function Combat:Init(Gui)
             else
                 StopSilentAim()
             end
+            UpdateFOVCircle()
         end, y)
         y = g:CreateSlider("Silent Aim FOV", 50, 500, Combat.Config.SilentAimFOV, function(val)
             Combat.Config.SilentAimFOV = val
+            UpdateFOVCircle()
         end, y)
         y = g:CreateDropdown("Hit Part", {"Head", "HumanoidRootPart"}, Combat.Config.SilentAimHitPart, function(val)
             Combat.Config.SilentAimHitPart = val
@@ -670,33 +643,15 @@ function Combat:Init(Gui)
         y = g:CreateToggle("Prediction", Combat.Config.SilentAimPrediction, function(state)
             Combat.Config.SilentAimPrediction = state
         end, y)
+        y = g:CreateToggle("Show Silent FOV", Combat.Config.SilentAimFOVVisible, function(state)
+            Combat.Config.SilentAimFOVVisible = state
+            UpdateFOVCircle()
+        end, y)
         y = g:CreateToggle("Body Hit Redirection", Combat.Config.BodyHitEnabled, function(state)
             Combat.Config.BodyHitEnabled = state
         end, y)
         y = g:CreateSlider("Body Hit Chance %", 0, 100, Combat.Config.BodyHitChance, function(val)
             Combat.Config.BodyHitChance = val
-        end, y)
-
-        y = g:CreateSection("Hitbox Expander", y + 10)
-        y = g:CreateToggle("Hitbox Expander", Combat.Config.HitboxEnabled, function(state)
-            Combat.Config.HitboxEnabled = state
-            if not state then RestoreHitboxes() end
-        end, y)
-        y = g:CreateSlider("Body Hitbox Size", 5, 25, Combat.Config.HitboxSize, function(val)
-            Combat.Config.HitboxSize = val
-        end, y)
-        y = g:CreateSlider("HeadHB Size", 10, 30, Combat.Config.HeadHBSize, function(val)
-            Combat.Config.HeadHBSize = val
-        end, y)
-
-        y = g:CreateSection("Kill All", y + 10)
-        y = g:CreateToggle("Kill All", false, function(state)
-            SetKillAll(state)
-        end, y)
-
-        y = g:CreateSection("Hitsounds", y + 10)
-        y = g:CreateToggle("Enabled", false, function(state)
-            Combat.Config.HitsoundsEnabled = state
         end, y)
         local hitsoundNames = {"None", "Skeet.cc", "Neverlose", "Baimware", "Old Fatality", "Rust", "Bell", "TF2", "Among Us", "Fortnite Headshot", "Minecraft", "Osu", "TF2 Critical", "Bat", "Call of Duty", "Bruh", "Crowbar", "Weeb", "Steve"}
         y = g:CreateDropdown("Sound", hitsoundNames, "Skeet.cc", function(val)
