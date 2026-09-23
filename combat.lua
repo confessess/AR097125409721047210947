@@ -126,40 +126,7 @@ local function StartSilentAim()
     if SilentAimRunning then return end
     SilentAimRunning = true
 
-    -- Try hooking multiple functions to find the right one
-    local functionsToHook = {}
-
-    for _, v in pairs(getgc()) do
-        if type(v) == "function" and islclosure(v) then
-            local name = debug.info(v, "n")
-            local consts = debug.getconstants(v)
-
-            -- Candidate 1: Raycast function
-            if name == "Raycast" and #consts == 7 and consts[1] == "FindPartOnRayWithIgnoreList" then
-                table.insert(functionsToHook, {name = "Raycast", func = v})
-            end
-
-            -- Candidate 2: doRay function
-            if name == "doRay" and #consts == 12 then
-                table.insert(functionsToHook, {name = "doRay", func = v})
-            end
-
-            -- Candidate 3: firebullet function
-            if name == "firebullet" then
-                table.insert(functionsToHook, {name = "firebullet", func = v})
-            end
-
-            -- Candidate 4: Any function with FindPartOnRayWithIgnoreList
-            for _, c in ipairs(consts) do
-                if c == "FindPartOnRayWithIgnoreList" then
-                    table.insert(functionsToHook, {name = name or "unknown", func = v})
-                    break
-                end
-            end
-        end
-    end
-
-    print("[ENI] Found " .. #functionsToHook .. " candidate functions to hook")
+    print("[ENI] Starting silent aim...")
 
     -- Store config in globals
     getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
@@ -224,59 +191,61 @@ local function StartSilentAim()
         return closest
     end
 
-    -- Update target every frame
+    -- Update target every frame with debug
     local target = nil
+    local frameCount = 0
     RunService.RenderStepped:Connect(function()
+        frameCount = frameCount + 1
         if config.Enabled == false then
             target = nil
             return
         end
         target = GetClosestPlayer()
+
+        -- Debug target status every 60 frames
+        if frameCount % 60 == 0 then
+            print("[ENI TARGET] Enabled: " .. tostring(config.Enabled) .. " | Target: " .. tostring(target))
+        end
     end)
 
-    -- Hook ALL candidate functions
-    for _, candidate in ipairs(functionsToHook) do
-        local func = candidate.func
-        local name = candidate.name
-        local callCount = 0
-
-        print("[ENI] Hooking " .. name .. "...")
-
-        local old
-        old = hookfunction(func, function(...)
-            callCount = callCount + 1
-            local args = {...}
-
-            -- Debug every 30 calls
-            if callCount % 30 == 0 then
-                print("[ENI DEBUG] " .. name .. " called " .. callCount .. " times")
-                print("[ENI DEBUG] Target: " .. tostring(target))
-                print("[ENI DEBUG] Args count: " .. #args)
+    -- Hook getCollisionPoint - this is where hits are calculated
+    local getCollisionPointFunc = nil
+    for _, v in pairs(getgc()) do
+        if type(v) == "function" and islclosure(v) then
+            local name = debug.info(v, "n")
+            if name == "getCollisionPoint" then
+                getCollisionPointFunc = v
+                break
             end
-
-            -- If we have a target and this might be a bullet function
-            if target and target.Position and config.Enabled ~= false then
-                print("[ENI DEBUG] " .. name .. " - We have target, checking args...")
-
-                -- Try to modify based on argument patterns
-                for i, arg in ipairs(args) do
-                    if typeof(arg) == "Ray" then
-                        print("[ENI DEBUG] Found Ray at arg " .. i .. ", modifying...")
-                        local aimPos = target.Position
-                        local origin = arg.Origin
-                        local direction = (aimPos - origin).Unit * (aimPos - origin).Magnitude
-                        args[i] = Ray.new(origin, direction)
-                    elseif typeof(arg) == "Vector3" and i <= 2 then
-                        print("[ENI DEBUG] Found Vector3 at arg " .. i .. ", might be direction")
-                    end
-                end
-            end
-
-            return old(unpack(args))
-        end)
+        end
     end
 
-    print("[ENI] Hooked " .. #functionsToHook .. " functions")
+    if getCollisionPointFunc then
+        print("[ENI] Found getCollisionPoint, hooking...")
+
+        local old
+        old = hookfunction(getCollisionPointFunc, function(arg1, arg2, ...)
+            -- Debug
+            print("[ENI HOOK] getCollisionPoint called")
+            print("[ENI HOOK] Arg1 type: " .. typeof(arg1))
+            print("[ENI HOOK] Arg2 type: " .. typeof(arg2))
+            print("[ENI HOOK] Target: " .. tostring(target))
+
+            -- If we have a target, modify the return value
+            if target and target.Position and config.Enabled ~= false then
+                print("[ENI HOOK] Returning target position instead!")
+                return target, target.Position
+            end
+
+            return old(arg1, arg2, ...)
+        end)
+
+        print("[ENI] getCollisionPoint hooked successfully!")
+    else
+        warn("[ENI] getCollisionPoint not found!")
+    end
+
+    print("[ENI] Silent aim initialization complete")
 end
 
 local function StopSilentAim()

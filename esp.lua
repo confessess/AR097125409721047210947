@@ -12,7 +12,6 @@ local LocalPlayer = Players.LocalPlayer
 ESP.Config = {
     Enabled = false,
     Boxes = false,
-    ThreeDBoxes = false,
     Names = false,
     Health = false,
     Distance = false,
@@ -25,7 +24,6 @@ ESP.Config = {
 
 local ESPObjects = {}
 local Highlights = {}
-local BoxHighlights = {}
 
 local function HideAllESP()
     for _, esp in pairs(ESPObjects) do
@@ -45,16 +43,6 @@ local function HideAllChams()
         if hl then
             hl.Enabled = false
             hl.Parent = nil
-        end
-    end
-end
-
-local function HideAll3DBoxes()
-    for _, box in pairs(BoxHighlights) do
-        if box then
-            box.Visible = false
-            box.Adornee = nil
-            box.Parent = nil
         end
     end
 end
@@ -127,17 +115,6 @@ local function CreateESP(player)
         Highlights[player] = hl
     end
 
-    if not BoxHighlights[player] then
-        local boxHl = Instance.new("SelectionBox")
-        boxHl.Name = "ESP3DBox"
-        boxHl.LineThickness = 0.06
-        boxHl.Transparency = 0
-        boxHl.Color3 = ESP.Config.Color
-        boxHl.Visible = false
-        boxHl.Adornee = nil
-        BoxHighlights[player] = boxHl
-    end
-
     return esp
 end
 
@@ -150,9 +127,12 @@ local function RemoveESP(player)
         ESPObjects[player] = nil
     end
     local hl = Highlights[player]
-    if hl then hl:Destroy() Highlights[player] = nil end
-    local boxHl = BoxHighlights[player]
-    if boxHl then boxHl:Destroy() BoxHighlights[player] = nil end
+    if hl then
+        hl.Enabled = false
+        hl.Parent = nil
+        hl:Destroy()
+        Highlights[player] = nil
+    end
 end
 
 local function UpdateESP()
@@ -160,14 +140,12 @@ local function UpdateESP()
     if not camera then
         HideAllESP()
         HideAllChams()
-        HideAll3DBoxes()
         return
     end
 
     if not ESP.Config.Enabled then
         HideAllESP()
         HideAllChams()
-        HideAll3DBoxes()
         return
     end
 
@@ -192,11 +170,10 @@ local function UpdateESP()
                 esp.Distance.Visible = false
                 esp.Weapon.Visible = false
             end
-            local boxHl = BoxHighlights[player]
-            if boxHl then
-                boxHl.Visible = false
-                boxHl.Adornee = nil
-                boxHl.Parent = nil
+            local hl = Highlights[player]
+            if hl then
+                hl.Enabled = false
+                hl.Parent = nil
             end
             continue
         end
@@ -332,54 +309,24 @@ local function UpdateESP()
                 end
             end
         end
-        hl.Enabled = showChams
+
         if showChams then
+            hl.Enabled = true
             hl.FillColor = ESP.Config.Color
             hl.OutlineColor = ESP.Config.Color
-        end
-    end
-
-    for player, boxHl in pairs(BoxHighlights) do
-        local character = player.Character
-        local showBox = false
-        if character and ESP.Config.ThreeDBoxes and ESP.Config.Enabled then
-            if not ESP.Config.TeamCheck or player.Team ~= LocalPlayer.Team then
-                local rootPart = character:FindFirstChild("HumanoidRootPart")
-                if rootPart then
-                    local distance = (rootPart.Position - Workspace.CurrentCamera.CFrame.Position).Magnitude
-                    if distance <= ESP.Config.RenderDistance then
-                        showBox = true
-                    end
-                end
-            end
-        end
-
-        if showBox then
-            boxHl.Adornee = character
-            boxHl.Parent = character.Parent
-            boxHl.Color3 = ESP.Config.Color
-            boxHl.Visible = true
-            boxHl.Transparency = 0
         else
-            boxHl.Adornee = nil
-            boxHl.Parent = nil
-            boxHl.Visible = false
+            hl.Enabled = false
+            hl.Parent = nil
         end
     end
+
 end
 
 RunService.RenderStepped:Connect(UpdateESP)
 
 for _, player in ipairs(Players:GetPlayers()) do if player ~= LocalPlayer then CreateESP(player) end end
 Players.PlayerAdded:Connect(function(p) task.wait(1) CreateESP(p) end)
-Players.PlayerRemoving:Connect(function(p)
-    RemoveESP(p)
-    if BoxHighlights[p] then
-        BoxHighlights[p].Visible = false
-        BoxHighlights[p].Adornee = nil
-        BoxHighlights[p].Parent = nil
-    end
-end)
+Players.PlayerRemoving:Connect(RemoveESP)
 
 function ESP:Init(Gui)
     self.Gui = Gui
@@ -394,14 +341,9 @@ function ESP:Init(Gui)
             if not s then
                 HideAllESP()
                 HideAllChams()
-                HideAll3DBoxes()
             end
         end, y)
         y = g:CreateToggle("Boxes", false, function(s) ESP.Config.Boxes = s end, y)
-        y = g:CreateToggle("3D Boxes", false, function(s)
-            ESP.Config.ThreeDBoxes = s
-            if not s then HideAll3DBoxes() end
-        end, y)
         y = g:CreateToggle("Names", false, function(s) ESP.Config.Names = s end, y)
         y = g:CreateToggle("Health", false, function(s) ESP.Config.Health = s end, y)
         y = g:CreateToggle("Distance", false, function(s) ESP.Config.Distance = s end, y)
