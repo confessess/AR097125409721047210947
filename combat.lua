@@ -163,12 +163,22 @@ local function StartSilentAim()
         local fov = config.FOV or 150
         local hitPartName = config.HitPart or "Head"
 
+        -- Debug
+        local playerCount = 0
+        local validCount = 0
+        local partCount = 0
+        local losCount = 0
+        local screenCount = 0
+
         for _, v in pairs(Players:GetPlayers()) do
+            playerCount = playerCount + 1
             if not IsValidTarget(v) then continue end
+            validCount = validCount + 1
             local char = v.Character
             local targetPart = char:FindFirstChild(hitPartName)
             if not targetPart then targetPart = char:FindFirstChild("Head") end
             if not targetPart then continue end
+            partCount = partCount + 1
 
             local origin = Camera.CFrame.Position
             local direction = targetPart.Position - origin
@@ -178,14 +188,21 @@ local function StartSilentAim()
             params.IgnoreWater = true
             local result = Workspace:Raycast(origin, direction, params)
             if result and not result.Instance:IsDescendantOf(char) then continue end
+            losCount = losCount + 1
 
             local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
             if not onScreen then continue end
+            screenCount = screenCount + 1
             local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
             if dist < closestDistance and dist < fov then
                 closestDistance = dist
                 closest = targetPart
             end
+        end
+
+        -- Debug every 60 frames
+        if math.random(1, 60) == 1 then
+            print("[ENI SCAN] Players: " .. playerCount .. " | Valid: " .. validCount .. " | HasPart: " .. partCount .. " | LOS: " .. losCount .. " | OnScreen: " .. screenCount .. " | FOV: " .. fov)
         end
 
         return closest
