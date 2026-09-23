@@ -1,5 +1,3 @@
-print("[COMBAT] Loading combat module...")
-
 local Combat = {}
 Combat.__index = Combat
 
@@ -1157,6 +1155,23 @@ function Combat.new(deps)
     self.GUI = deps.GUI
     self.Core = deps.Core
     return self
+end
+
+function Combat:Init()
+    print("[COMBAT] Init called")
+    -- Initialize silent aim if enabled
+    if self.Config.SilentAimEnabled then
+        StartSilentAim()
+    end
+end
+
+function Combat:Update(dt)
+    -- Update logic here if needed
+end
+
+function Combat:Cleanup()
+    print("[COMBAT] Cleanup called")
+    StopSilentAim()
 end
 
 return Combat
