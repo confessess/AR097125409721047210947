@@ -128,26 +128,26 @@ local function StartSilentAim()
 
     print("[ENI] Starting silent aim with FULL DEBUG...")
 
-    -- Use main Config instead of separate config
+    -- Use Combat.Config directly
     local config = {
-        Enabled = Config.Get("SilentAim_Enabled") or false,
-        TeamCheck = Config.Get("SilentAim_TeamCheck") ~= false,
-        FOV = Config.Get("SilentAim_FOVSize") or 150,
-        HitPart = Config.Get("SilentAim_HitPart") or "Head",
-        Prediction = Config.Get("SilentAim_Prediction") == true,
-        BodyHitEnabled = Config.Get("SilentAim_BodyHitEnabled") == true,
-        BodyHitChance = Config.Get("SilentAim_BodyHitChance") or 0,
+        Enabled = Combat.Config.SilentAimEnabled or false,
+        TeamCheck = Combat.Config.TeamCheck ~= false,
+        FOV = Combat.Config.SilentAimFOV or 150,
+        HitPart = Combat.Config.SilentAimHitPart or "Head",
+        Prediction = Combat.Config.SilentAimPrediction == true,
+        BodyHitEnabled = Combat.Config.BodyHitEnabled == true,
+        BodyHitChance = Combat.Config.BodyHitChance or 0,
     }
 
-    -- Update config every frame from main Config
+    -- Update config every frame from Combat.Config
     local function UpdateConfig()
-        config.Enabled = Config.Get("SilentAim_Enabled") or false
-        config.TeamCheck = Config.Get("SilentAim_TeamCheck") ~= false
-        config.FOV = Config.Get("SilentAim_FOVSize") or 150
-        config.HitPart = Config.Get("SilentAim_HitPart") or "Head"
-        config.Prediction = Config.Get("SilentAim_Prediction") == true
-        config.BodyHitEnabled = Config.Get("SilentAim_BodyHitEnabled") == true
-        config.BodyHitChance = Config.Get("SilentAim_BodyHitChance") or 0
+        config.Enabled = Combat.Config.SilentAimEnabled or false
+        config.TeamCheck = Combat.Config.TeamCheck ~= false
+        config.FOV = Combat.Config.SilentAimFOV or 150
+        config.HitPart = Combat.Config.SilentAimHitPart or "Head"
+        config.Prediction = Combat.Config.SilentAimPrediction == true
+        config.BodyHitEnabled = Combat.Config.BodyHitEnabled == true
+        config.BodyHitChance = Combat.Config.BodyHitChance or 0
     end
 
     -- Helper functions with DEBUG
