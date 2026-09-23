@@ -128,9 +128,27 @@ local function StartSilentAim()
 
     print("[ENI] Starting silent aim with FULL DEBUG...")
 
-    -- Store config in globals
-    getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
-    local config = getgenv().__SilentAimConfig
+    -- Use main Config instead of separate config
+    local config = {
+        Enabled = Config.Get("SilentAim_Enabled") or false,
+        TeamCheck = Config.Get("SilentAim_TeamCheck") ~= false,
+        FOV = Config.Get("SilentAim_FOVSize") or 150,
+        HitPart = Config.Get("SilentAim_HitPart") or "Head",
+        Prediction = Config.Get("SilentAim_Prediction") == true,
+        BodyHitEnabled = Config.Get("SilentAim_BodyHitEnabled") == true,
+        BodyHitChance = Config.Get("SilentAim_BodyHitChance") or 0,
+    }
+
+    -- Update config every frame from main Config
+    local function UpdateConfig()
+        config.Enabled = Config.Get("SilentAim_Enabled") or false
+        config.TeamCheck = Config.Get("SilentAim_TeamCheck") ~= false
+        config.FOV = Config.Get("SilentAim_FOVSize") or 150
+        config.HitPart = Config.Get("SilentAim_HitPart") or "Head"
+        config.Prediction = Config.Get("SilentAim_Prediction") == true
+        config.BodyHitEnabled = Config.Get("SilentAim_BodyHitEnabled") == true
+        config.BodyHitChance = Config.Get("SilentAim_BodyHitChance") or 0
+    end
 
     -- Helper functions with DEBUG
     local function IsValidTarget(plr)
@@ -224,6 +242,9 @@ local function StartSilentAim()
     RunService.RenderStepped:Connect(function()
         frameCount = frameCount + 1
 
+        -- Update config from main Config every frame
+        UpdateConfig()
+
         -- Print first frame to show it's working
         if not hasPrintedInitial then
             print("[ENI FRAME] RenderStepped connected! Frame: " .. frameCount)
@@ -233,7 +254,7 @@ local function StartSilentAim()
 
         if config.Enabled == false then
             if frameCount % 60 == 0 then
-                print("[ENI FRAME] Silent aim DISABLED (frame " .. frameCount .. ")")
+                print("[ENI FRAME] Silent aim DISABLED (frame " .. frameCount .. ") | Config.Enabled: " .. tostring(config.Enabled))
             end
             target = nil
             return
