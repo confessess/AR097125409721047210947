@@ -1,4 +1,4 @@
-local BASE = "https://raw.githubusercontent.com/confessess/88888asnd09an7ds0a897nwd0a8d7a208d7a2809d7aw98d79n8sa7nw982d7san98d7/main/"
+local BASE = "https://raw.githubusercontent.com/confessess/AR097125409721047210947/refs/heads/main/main.lua"
 
 local GuiModule = loadstring(game:HttpGet(BASE .. "gui.lua"))()
 local CombatModule = loadstring(game:HttpGet(BASE .. "combat.lua"))()
@@ -70,7 +70,7 @@ local function SaveConfig()
         Movement = SerializeConfig(MovementModule.Config),
     }
 
-    local json = game:GetService("HttpService"):JSONEncode(allConfigs)
+    local json = game:GetService("Service"):JSONEncode(allConfigs)
 
     if writefile then
         pcall(function()
