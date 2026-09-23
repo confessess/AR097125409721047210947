@@ -229,6 +229,7 @@ local function StartSilentAim()
         local closest = nil
         local closestDist = math.huge
         local mousePos = UserInputService:GetMouseLocation()
+        local maxFov = (config and (config.FOV or Combat.Config.SilentAimFOV)) or Combat.Config.SilentAimFOV or 150
 
         -- DEBUG: Count players checked
         local checked = 0
@@ -255,6 +256,7 @@ local function StartSilentAim()
 
             -- Distance from MOUSE (not screen center)
             local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+            if dist > maxFov then continue end
             if dist < closestDist then
                 closestDist = dist
                 closest = {
