@@ -1148,4 +1148,13 @@ function Combat:Init(Gui)
     return self
 end
 
+function Combat.new(deps)
+    local self = setmetatable({}, Combat)
+    self.Config = deps.Config or Combat.Config
+    self.Utils = deps.Utils
+    self.GUI = deps.GUI
+    self.Core = deps.Core
+    return self
+end
+
 return Combat
