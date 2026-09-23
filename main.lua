@@ -1,101 +1,23 @@
-local function debugLog(prefix, ...)
-    local args = { ... }
-    local text = ""
-    for i, v in ipairs(args) do
-        if i > 1 then text = text .. " " end
-        text = text .. tostring(v)
-    end
-    print("[" .. prefix .. "] " .. text)
-end
-
-local function safeExecRemoteScript(url)
-    local ok, source = pcall(function()
-        return game:HttpGet(url)
-    end)
-    if not ok or type(source) ~= "string" or source == "" then
-        error("Remote bootstrap failed: unable to fetch " .. tostring(url))
-    end
-
-    local compiler = (loadstring or load)
-    if type(compiler) ~= "function" then
-        error("Remote bootstrap failed: neither loadstring nor load is available on this executor")
-    end
-
-    local compileOK, compiled = pcall(function()
-        return compiler(source)
-    end)
-    if not compileOK or type(compiled) ~= "function" then
-        error("Remote bootstrap failed: script source did not compile")
-    end
-
-    local runOK, result = pcall(function()
-        return compiled()
-    end)
-    if not runOK then
-        error("Remote bootstrap failed at runtime: " .. tostring(result))
-    end
-
-    return result
-end
-
 local function loadModule(name)
-    debugLog("BOOT", "Loading module:", name)
-
-    local candidates = {}
-    if type(script) == "Instance" then
-        local scriptParent = script.Parent
-        if scriptParent then
-            table.insert(candidates, scriptParent:FindFirstChild(name))
-            if scriptParent.Parent then
-                table.insert(candidates, scriptParent.Parent:FindFirstChild(name))
-            end
-        end
-    end
-
-    local rep = game:GetService("ReplicatedStorage")
-    local repoFolder = rep and rep:FindFirstChild("LightHub")
-    if repoFolder then
-        table.insert(candidates, repoFolder:FindFirstChild(name))
-    end
-
-    for _, candidate in ipairs(candidates) do
-        if candidate and candidate:IsA("ModuleScript") then
-            debugLog("BOOT", "Using local module:", name, "@", candidate:GetFullName())
-            return require(candidate)
+    if script and script.Parent then
+        local moduleObject = script.Parent:FindFirstChild(name)
+        if moduleObject then
+            return require(moduleObject)
         end
     end
 
     local BASE = "https://raw.githubusercontent.com/confessess/AR097125409721047210947/main/"
-    local source, fetchErr = pcall(function()
-        return game:HttpGet(BASE .. name .. ".lua")
-    end)
-
-    if not source then
-        error("Failed to fetch remote module " .. name .. ": " .. tostring(fetchErr))
-    end
-
-    local compileFn = loadstring or load
-    if not compileFn then
-        error("No compile function available for module " .. name .. ". loadstring and load are both nil.")
-    end
-
     local ok, result = pcall(function()
-        local compiled = compileFn(source)
-        if type(compiled) ~= "function" then
-            error("Remote source for " .. name .. " was empty or invalid")
-        end
-        return compiled()
+        return loadstring(game:HttpGet(BASE .. name .. ".lua"))()
     end)
 
     if not ok then
         error("Failed to load module " .. name .. ": " .. tostring(result))
     end
 
-    debugLog("BOOT", "Loaded remote module:", name)
     return result
 end
 
-print("[BOOT] Starting bootstrap")
 local GuiModule = loadModule("gui")
 local CombatModule = loadModule("combat")
 local ESPModule = loadModule("esp")
@@ -104,17 +26,7 @@ local MovementModule = loadModule("movement")
 local WorldModule = loadModule("world")
 local SkinChangerModule = loadModule("skinchanger")
 
-print("[BOOT] Module states:", type(GuiModule), type(CombatModule), type(ESPModule), type(GunModsModule), type(MovementModule), type(WorldModule), type(SkinChangerModule))
-if not GuiModule then error("GuiModule is nil after loadModule('gui')") end
-if not CombatModule then error("CombatModule is nil after loadModule('combat')") end
-if not ESPModule then error("ESPModule is nil after loadModule('esp')") end
-if not GunModsModule then error("GunModsModule is nil after loadModule('gunmods')") end
-if not MovementModule then error("MovementModule is nil after loadModule('movement')") end
-if not WorldModule then error("WorldModule is nil after loadModule('world')") end
-if not SkinChangerModule then error("SkinChangerModule is nil after loadModule('skinchanger')") end
-
 local Gui = GuiModule:Init()
-print("[BOOT] GUI created")
 
 Gui:CreateTab("Combat", "Aimbot, silent aim, hitbox, kill all.")
 Gui:CreateTab("Visuals", "ESP and world rendering.")
@@ -123,37 +35,13 @@ Gui:CreateTab("Movement", "Speed, jump, and fly settings.")
 Gui:CreateTab("Skin Changer", "Announcers, arms, and melee skins.")
 Gui:CreateTab("World", "World modifications.")
 Gui:CreateTab("Settings", "GUI preferences, keybinds, configs.")
-print("[BOOT] Tab list after creation:", table.concat(function()
-    local names = {}
-    for _, tab in ipairs(Gui.Tabs or {}) do
-        table.insert(names, tab.Name)
-    end
-    return names
-end(), ", "))
 
-print("[BOOT] Initializing modules")
-print("[BOOT] CombatModule type:", type(CombatModule), "Init:", type(CombatModule and CombatModule.Init))
-print("[BOOT] Gui has SetTabRebuild:", type(Gui.SetTabRebuild))
-print("[BOOT] Combat tab exists before Init:", Gui:GetTab("Combat") ~= nil)
 CombatModule:Init(Gui)
-print("[BOOT] Combat tab exists after Init:", Gui:GetTab("Combat") ~= nil)
-if Gui:GetTab("Combat") then
-    print("[BOOT] Combat tab rebuild is now:", Gui:GetTab("Combat").Rebuild ~= nil)
-end
 ESPModule:Init(Gui)
 GunModsModule:Init(Gui)
 MovementModule:Init(Gui)
 WorldModule:Init(Gui)
 SkinChangerModule:Init(Gui)
-print("[BOOT] Modules initialized")
-
-if Gui.CurrentTab then
-    print("[BOOT] Refreshing current tab:", Gui.CurrentTab)
-    Gui:SwitchTab(Gui.CurrentTab)
-else
-    print("[BOOT] Switching to Combat")
-    Gui:SwitchTab("Combat")
-end
 
 --// CONFIG SYSTEM — automatic save/load
 local CONFIG_PATH = "blackout_config.json"

@@ -99,13 +99,8 @@ end
 
 --// ScreenGui
 function Gui:Init()
-    print("[GUI] Init starting")
-    for _, child in ipairs(PlayerGui:GetChildren()) do
-        if child.Name == "BlackoutGUI" then
-            print("[GUI] Destroying stale GUI:", child)
-            child:Destroy()
-        end
-    end
+    local old = PlayerGui:FindFirstChild("BlackoutGUI")
+    if old then old:Destroy() end
 
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "BlackoutGUI"
@@ -523,15 +518,11 @@ function Gui:CreateTab(name, description)
     local tabData = { Name = name, Description = description, Elements = {} }
     table.insert(self.Tabs, tabData)
 
-    if #self.Tabs == 1 then
-        self.CurrentTab = name
-    end
-
+    if #self.Tabs == 1 then self:SwitchTab(name) end
     return tabData
 end
 
 function Gui:SwitchTab(name)
-    print("[GUI] Switching to tab:", name)
     self.CurrentTab = name
     for tabName, data in pairs(self.TabButtons) do
         if tabName == name then
@@ -559,16 +550,7 @@ function Gui:SwitchTab(name)
     end
 
     local tab = self:GetTab(name)
-    if tab then
-        print("[GUI] Tab exists:", name, "has rebuild:", tab.Rebuild ~= nil)
-        if tab.Rebuild then
-            print("[GUI] Invoking rebuild for:", name)
-            tab.Rebuild(self)
-            print("[GUI] Rebuild finished for:", name)
-        end
-    else
-        warn("[GUI] Tab missing when switching:", name)
-    end
+    if tab and tab.Rebuild then tab.Rebuild(self) end
 end
 
 function Gui:GetTab(name)
@@ -586,26 +568,8 @@ function Gui:GetTabDescription(name)
 end
 
 function Gui:SetTabRebuild(name, callback)
-    print("[GUI] Registering rebuild for:", name)
-    print("[GUI] Existing tabs before registration:", table.concat(function()
-        local names = {}
-        for _, tab in ipairs(self.Tabs or {}) do
-            table.insert(names, tab.Name)
-        end
-        return names
-    end(), ", "))
     local tab = self:GetTab(name)
-    if tab then
-        tab.Rebuild = callback
-        print("[GUI] Rebuild registered for:", name, "callback type:", type(callback))
-        print("[GUI] After registration, tab rebuild exists:", tab.Rebuild ~= nil)
-        if self.CurrentTab == name then
-            print("[GUI] Refreshing active tab:", name)
-            self:SwitchTab(name)
-        end
-    else
-        warn("[GUI] Tried to register rebuild for missing tab:", name)
-    end
+    if tab then tab.Rebuild = callback end
 end
 
 function Gui:CreateScrollContent()
@@ -650,7 +614,7 @@ function Gui:CreateSection(text, y)
     local Divider = Instance.new("Frame")
     Divider.Size = UDim2.new(1, 0, 0, 1)
     Divider.Position = UDim2.fromOffset(0, y + 28)
-    Divider.BackgroundColor3 = BORDER
+    Divider.BackgroundColor3 = Color3.fromRGB(65, 30, 31)
     Divider.BorderSizePixel = 0
     Divider.ZIndex = 3
     Divider.Parent = self.Content
