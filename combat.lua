@@ -277,72 +277,105 @@ local function StartSilentAim()
 
 -- RestoreHitbox now included in ExpandHitboxToFOV section above
 
-    -- Use EXACT SAME method as working HBE
     local OriginalData = {}
+
+    local function GetDynamicHitboxSize(partName, fovRadius)
+        local base = math.clamp(fovRadius / 12, 2.5, 18)
+        local partMap = {
+            Head = {1.8, 1.8, 1.8},
+            UpperTorso = {1.4, 1.4, 1.4},
+            Torso = {1.5, 1.5, 1.5},
+            LowerTorso = {1.45, 1.45, 1.45},
+            HumanoidRootPart = {1.8, 1.8, 1.8},
+            LeftUpperLeg = {1.2, 1.2, 1.2},
+            RightUpperLeg = {1.2, 1.2, 1.2},
+            Left Arm = {1.1, 1.1, 1.1},
+            Right Arm = {1.1, 1.1, 1.1},
+            LeftLeg = {1.15, 1.15, 1.15},
+            RightLeg = {1.15, 1.15, 1.15},
+            Left Lower Leg = {1.2, 1.2, 1.2},
+            Right Lower Leg = {1.2, 1.2, 1.2},
+            HeadHB = {2.0, 2.0, 2.0},
+        }
+
+        local multiplier = partMap[partName] or {1.0, 1.0, 1.0}
+        return Vector3.new(base * multiplier[1], base * multiplier[2], base * multiplier[3])
+    end
 
     local expandCount = 0
     local function ExpandHitboxToFOV(targetData)
-        if not targetData or not targetData.part then 
+        if not targetData or not targetData.part then
             print("[ENI EXPAND] No target data or part")
-            return 
+            return
         end
+
         local char = targetData.character
-        if not char then 
+        if not char then
             print("[ENI EXPAND] No character")
-            return 
+            return
+        end
+
+        local origin = Camera.CFrame.Position
+        local direction = (targetData.part.Position - origin)
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = {LocalPlayer.Character, char}
+        params.IgnoreWater = true
+        local wallCheck = Workspace:Raycast(origin, direction, params)
+        if wallCheck and wallCheck.Instance and not wallCheck.Instance:IsDescendantOf(char) then
+            print("[ENI EXPAND] Blocked by wall, skipping expansion for " .. targetData.player.Name)
+            return
         end
 
         expandCount = expandCount + 1
-        print("[ENI EXPAND] === Expanding hitbox #" .. expandCount .. " ===")
-        print("[ENI EXPAND] Target: " .. targetData.player.Name)
-        print("[ENI EXPAND] Part: " .. targetData.part.Name)
-        print("[ENI EXPAND] Part position: " .. tostring(targetData.part.Position))
-        print("[ENI EXPAND] Part size BEFORE: " .. tostring(targetData.part.Size))
+        local fov = Combat.Config.SilentAimFOV or (config and config.FOV) or 150
+        local targetPartName = targetData.part.Name
 
-        -- Calculate expansion size based on distance (FOV-based)
-        local distance = (targetData.part.Position - Camera.CFrame.Position).Magnitude
-        local fov = config.FOV or 150
+        print("[ENI EXPAND] Target: " .. targetData.player.Name .. " | Part: " .. targetPartName .. " | Silent FOV: " .. fov)
 
-        -- Scale size based on distance - closer = bigger
-        local baseSize = math.clamp(distance * (fov / 100), 5, 25)
-        print("[ENI EXPAND] Distance: " .. distance .. " | FOV: " .. fov .. " | Base size: " .. baseSize)
-
-        -- Use SAME parts as working HBE
-        local partsToExpand = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart"}
-
-        -- Also expand the selected hit part if it's different
-        local selectedPartName = targetData.part.Name
-        if not table.find(partsToExpand, selectedPartName) then
-            table.insert(partsToExpand, selectedPartName)
-        end
+        local partsToExpand = {
+            "Head",
+            "UpperTorso",
+            "Torso",
+            "LowerTorso",
+            "HumanoidRootPart",
+            "LeftUpperLeg",
+            "RightUpperLeg",
+            "Left Arm",
+            "Right Arm",
+            "Left Leg",
+            "Right Leg",
+            targetPartName,
+        }
 
         for _, partName in ipairs(partsToExpand) do
             local part = char:FindFirstChild(partName)
             if part and part:IsA("BasePart") then
-                -- Store original using SAME method as working HBE
                 if not OriginalData[part] then
-                    OriginalData[part] = {Size = part.Size, Transparency = part.Transparency}
+                    OriginalData[part] = { Size = part.Size, Transparency = part.Transparency }
                 end
 
-                -- Use SAME expansion method
-                local targetSize = (partName == "HeadHB") and
-                    Vector3.new(baseSize * 1.5, baseSize * 1.5, baseSize * 1.5) or
-                    Vector3.new(baseSize, baseSize, baseSize)
-
-                part.Size = targetSize
-                part.Transparency = 1  -- SAME as working HBE (invisible)
-
+                local newSize = GetDynamicHitboxSize(partName, fov)
+                part.Size = newSize
+                part.Transparency = 1
                 table.insert(expandedParts, part)
             end
         end
 
         currentHitPart = targetData.part
-        print("[ENI EXPAND] Part size AFTER: " .. tostring(targetData.part.Size))
-        print("[ENI EXPAND] Expansion complete!")
+        print("[ENI EXPAND] Expansion complete for " .. targetData.player.Name)
     end
 
     local function RestoreHitbox(char)
-        -- Use SAME restore method as working HBE
+        if char and char.Parent then
+            for part, data in pairs(OriginalData) do
+                if part and part.Parent and part.Parent == char then
+                    part.Size = data.Size
+                    part.Transparency = data.Transparency
+                end
+            end
+        end
+
         for part, data in pairs(OriginalData) do
             if part and part.Parent then
                 part.Size = data.Size
@@ -434,12 +467,26 @@ local function StartSilentAim()
             expandedParts = {}
         end
 
-        -- Expand new target if needed
+        -- Expand new target if needed, but only if no wall is blocking it
         if shouldExpand and newTarget then
-            print("[ENI TARGET] New target: " .. newTarget.player.Name)
-            currentTarget = newTarget
-            currentTargetChar = newTarget.character
-            ExpandHitboxToFOV(newTarget)
+            local origin = Camera.CFrame.Position
+            local direction = (newTarget.part.Position - origin)
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances = {LocalPlayer.Character, newTarget.character}
+            params.IgnoreWater = true
+            local wallCheck = Workspace:Raycast(origin, direction, params)
+            if not wallCheck or wallCheck.Instance:IsDescendantOf(newTarget.character) then
+                print("[ENI TARGET] New target: " .. newTarget.player.Name)
+                currentTarget = newTarget
+                currentTargetChar = newTarget.character
+                ExpandHitboxToFOV(newTarget)
+            else
+                print("[ENI TARGET] Wall blocked target expansion: " .. newTarget.player.Name)
+                currentTarget = nil
+                currentTargetChar = nil
+                currentHitPart = nil
+            end
         end
 
         -- Debug current target status every 2 seconds
@@ -704,6 +751,14 @@ local function StopSilentAim()
     SilentAimRunning = false
     getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
     getgenv().__SilentAimConfig.Enabled = false
+
+    if currentTargetChar then
+        RestoreHitbox(currentTargetChar)
+        currentTarget = nil
+        currentTargetChar = nil
+        currentHitPart = nil
+        expandedParts = {}
+    end
 end
 
 --// Input handlers
@@ -1092,6 +1147,13 @@ function Combat:Init(Gui)
             y = g:CreateSlider("FOV Radius", 10, 200, Combat.Config.FOV, function(val)
                 Combat.Config.FOV = val
             end, y)
+            y = g:CreateToggle("Show Aimbot FOV", Combat.Config.AimbotFOVVisible, function(state)
+                Combat.Config.AimbotFOVVisible = state
+                if getgenv().__ToggleFOVCircle then
+                    getgenv().__ToggleFOVCircle(state)
+                end
+                UpdateFOVCircle()
+            end, y)
 
             y = g:CreateSection("Silent Aim", y + 10)
             y = g:CreateToggle("Enabled", Combat.Config.SilentAimEnabled, function(state)
@@ -1115,13 +1177,6 @@ function Combat:Init(Gui)
                 if getgenv().__ToggleRandomHitPart then
                     getgenv().__ToggleRandomHitPart(state)
                 end
-            end, y)
-            y = g:CreateToggle("Show Aimbot FOV", Combat.Config.AimbotFOVVisible, function(state)
-                Combat.Config.AimbotFOVVisible = state
-                if getgenv().__ToggleFOVCircle then
-                    getgenv().__ToggleFOVCircle(state)
-                end
-                UpdateFOVCircle()
             end, y)
             y = g:CreateToggle("Show Silent FOV", Combat.Config.SilentAimFOVVisible, function(state)
                 Combat.Config.SilentAimFOVVisible = state
