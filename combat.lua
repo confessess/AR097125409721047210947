@@ -126,33 +126,45 @@ local function StartSilentAim()
     if SilentAimRunning then return end
     SilentAimRunning = true
 
-    print("[ENI] Starting silent aim...")
+    print("[ENI] Starting silent aim with FULL DEBUG...")
 
     -- Store config in globals
     getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
     local config = getgenv().__SilentAimConfig
 
-    -- Helper functions
+    -- Helper functions with DEBUG
     local function IsValidTarget(plr)
-        if plr == LocalPlayer then return false end
-        if not plr.Character then return false end
+        if plr == LocalPlayer then 
+            return false 
+        end
+        if not plr.Character then 
+            print("[ENI DEBUG] " .. plr.Name .. " has no character")
+            return false 
+        end
         local char = plr.Character
         local humanoid = char:FindFirstChildOfClass("Humanoid")
-        if not humanoid or humanoid.Health <= 0 then return false end
-        local spawned = char:FindFirstChild("Spawned")
-        if spawned and not spawned.Value then return false end
-        local status = char:FindFirstChild("Status")
-        if status then
-            local alive = status:FindFirstChild("Alive")
-            if alive and not alive.Value then return false end
+        if not humanoid then 
+            print("[ENI DEBUG] " .. plr.Name .. " has no humanoid")
+            return false 
         end
+        if humanoid.Health <= 0 then 
+            print("[ENI DEBUG] " .. plr.Name .. " is dead")
+            return false 
+        end
+
+        -- Team check
         if config.TeamCheck ~= false then
             local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
             local ffa = wkspc and wkspc:FindFirstChild("FFA")
             if not (ffa and ffa.Value) then
-                if plr.Team == LocalPlayer.Team then return false end
+                if plr.Team == LocalPlayer.Team then 
+                    print("[ENI DEBUG] " .. plr.Name .. " is teammate")
+                    return false 
+                end
             end
         end
+
+        print("[ENI DEBUG] " .. plr.Name .. " is VALID target")
         return true
     end
 
@@ -163,52 +175,48 @@ local function StartSilentAim()
         local fov = config.FOV or 150
         local hitPartName = config.HitPart or "Head"
 
-        -- Debug
-        local playerCount = 0
-        local validCount = 0
-        local partCount = 0
-        local losCount = 0
-        local screenCount = 0
+        print("[ENI SCAN] Starting scan... FOV: " .. fov .. " | HitPart: " .. hitPartName)
 
         for _, v in pairs(Players:GetPlayers()) do
-            playerCount = playerCount + 1
+            print("[ENI SCAN] Checking player: " .. v.Name)
             if not IsValidTarget(v) then continue end
-            validCount = validCount + 1
+
             local char = v.Character
             local targetPart = char:FindFirstChild(hitPartName)
-            if not targetPart then targetPart = char:FindFirstChild("Head") end
-            if not targetPart then continue end
-            partCount = partCount + 1
+            if not targetPart then 
+                print("[ENI SCAN] " .. v.Name .. " has no " .. hitPartName)
+                targetPart = char:FindFirstChild("Head") 
+            end
+            if not targetPart then 
+                print("[ENI SCAN] " .. v.Name .. " has no Head either")
+                continue 
+            end
 
-            local origin = Camera.CFrame.Position
-            local direction = targetPart.Position - origin
-            local params = RaycastParams.new()
-            params.FilterType = Enum.RaycastFilterType.Exclude
-            params.FilterDescendantsInstances = {LocalPlayer.Character}
-            params.IgnoreWater = true
-            local result = Workspace:Raycast(origin, direction, params)
-            if result and not result.Instance:IsDescendantOf(char) then continue end
-            losCount = losCount + 1
+            print("[ENI SCAN] Found part: " .. targetPart.Name)
 
+            -- Skip LOS check for now (too strict)
             local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-            if not onScreen then continue end
-            screenCount = screenCount + 1
+            if not onScreen then 
+                print("[ENI SCAN] " .. targetPart.Name .. " not on screen")
+                continue 
+            end
+
             local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
+            print("[ENI SCAN] Distance: " .. dist .. " | FOV: " .. fov)
+
             if dist < closestDistance and dist < fov then
                 closestDistance = dist
                 closest = targetPart
+                print("[ENI SCAN] New closest: " .. targetPart.Name .. " at " .. dist)
             end
         end
 
-        -- Debug every 60 frames
-        if math.random(1, 60) == 1 then
-            print("[ENI SCAN] Players: " .. playerCount .. " | Valid: " .. validCount .. " | HasPart: " .. partCount .. " | LOS: " .. losCount .. " | OnScreen: " .. screenCount .. " | FOV: " .. fov)
-        end
+        print("[ENI SCAN] Result: " .. tostring(closest))
 
         return closest
     end
 
-    -- Update target every frame with debug
+    -- Update target every frame with HEAVY debug
     local target = nil
     local frameCount = 0
     RunService.RenderStepped:Connect(function()
@@ -217,52 +225,16 @@ local function StartSilentAim()
             target = nil
             return
         end
-        target = GetClosestPlayer()
 
-        -- Debug target status every 60 frames
-        if frameCount % 60 == 0 then
-            print("[ENI TARGET] Enabled: " .. tostring(config.Enabled) .. " | Target: " .. tostring(target))
+        -- Only scan every 30 frames to reduce spam
+        if frameCount % 30 == 0 then
+            print("[ENI FRAME] Scanning for targets... (frame " .. frameCount .. ")")
+            target = GetClosestPlayer()
+            print("[ENI FRAME] Target result: " .. tostring(target))
         end
     end)
 
-    -- Hook getCollisionPoint - this is where hits are calculated
-    local getCollisionPointFunc = nil
-    for _, v in pairs(getgc()) do
-        if type(v) == "function" and islclosure(v) then
-            local name = debug.info(v, "n")
-            if name == "getCollisionPoint" then
-                getCollisionPointFunc = v
-                break
-            end
-        end
-    end
-
-    if getCollisionPointFunc then
-        print("[ENI] Found getCollisionPoint, hooking...")
-
-        local old
-        old = hookfunction(getCollisionPointFunc, function(arg1, arg2, ...)
-            -- Debug
-            print("[ENI HOOK] getCollisionPoint called")
-            print("[ENI HOOK] Arg1 type: " .. typeof(arg1))
-            print("[ENI HOOK] Arg2 type: " .. typeof(arg2))
-            print("[ENI HOOK] Target: " .. tostring(target))
-
-            -- If we have a target, modify the return value
-            if target and target.Position and config.Enabled ~= false then
-                print("[ENI HOOK] Returning target position instead!")
-                return target, target.Position
-            end
-
-            return old(arg1, arg2, ...)
-        end)
-
-        print("[ENI] getCollisionPoint hooked successfully!")
-    else
-        warn("[ENI] getCollisionPoint not found!")
-    end
-
-    print("[ENI] Silent aim initialization complete")
+    print("[ENI] Silent aim initialization complete - WAITING FOR TARGET...")
 end
 
 local function StopSilentAim()
