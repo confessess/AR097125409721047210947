@@ -219,18 +219,36 @@ local function StartSilentAim()
     -- Update target every frame with HEAVY debug
     local target = nil
     local frameCount = 0
+    local hasPrintedInitial = false
+
     RunService.RenderStepped:Connect(function()
         frameCount = frameCount + 1
+
+        -- Print first frame to show it's working
+        if not hasPrintedInitial then
+            print("[ENI FRAME] RenderStepped connected! Frame: " .. frameCount)
+            print("[ENI FRAME] Config.Enabled: " .. tostring(config.Enabled))
+            hasPrintedInitial = true
+        end
+
         if config.Enabled == false then
+            if frameCount % 60 == 0 then
+                print("[ENI FRAME] Silent aim DISABLED (frame " .. frameCount .. ")")
+            end
             target = nil
             return
         end
 
-        -- Only scan every 30 frames to reduce spam
-        if frameCount % 30 == 0 then
+        -- Scan every 60 frames (1 second)
+        if frameCount % 60 == 0 then
+            print("[ENI FRAME] ========================================")
             print("[ENI FRAME] Scanning for targets... (frame " .. frameCount .. ")")
+            print("[ENI FRAME] Config.Enabled: " .. tostring(config.Enabled))
+            print("[ENI FRAME] Config.FOV: " .. tostring(config.FOV))
+            print("[ENI FRAME] Config.HitPart: " .. tostring(config.HitPart))
             target = GetClosestPlayer()
             print("[ENI FRAME] Target result: " .. tostring(target))
+            print("[ENI FRAME] ========================================")
         end
     end)
 
