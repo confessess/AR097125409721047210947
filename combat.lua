@@ -126,7 +126,7 @@ local function StartSilentAim()
     if SilentAimRunning then return end
     SilentAimRunning = true
 
-    -- PATCHED: Find the Raycast function with new signature
+    -- Find the Raycast function
     local RaycastFunction = nil
     for _, v in pairs(getgc()) do
         if type(v) == "function" and islclosure(v) then
@@ -145,180 +145,120 @@ local function StartSilentAim()
         return
     end
 
-    print("[ENI] Found Raycast function, hooking...")
+    print("[ENI] Found Raycast function, hooking directly...")
 
-    -- Get or create actor
-    local actor = nil
-    if getactors then
-        local actors = getactors()
-        if #actors > 0 then
-            actor = actors[1]
+    -- Store config in globals for the hook to access
+    getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
+    local config = getgenv().__SilentAimConfig
+
+    -- Helper functions (defined outside the hook)
+    local function IsValidTarget(plr)
+        if plr == LocalPlayer then return false end
+        if not plr.Character then return false end
+        local char = plr.Character
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        if not humanoid or humanoid.Health <= 0 then return false end
+        local spawned = char:FindFirstChild("Spawned")
+        if spawned and not spawned.Value then return false end
+        local status = char:FindFirstChild("Status")
+        if status then
+            local alive = status:FindFirstChild("Alive")
+            if alive and not alive.Value then return false end
         end
+        if config.TeamCheck ~= false then
+            local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
+            local ffa = wkspc and wkspc:FindFirstChild("FFA")
+            if not (ffa and ffa.Value) then
+                if plr.Team == LocalPlayer.Team then return false end
+            end
+        end
+        return true
     end
 
-    -- If no actor exists, create one
-    if not actor and Instance then
-        local success, newActor = pcall(function()
-            local a = Instance.new("Actor")
-            a.Name = "SilentAimActor"
-            a.Parent = Workspace
-            return a
-        end)
-        if success then
-            actor = newActor
-        end
-    end
+    local function GetClosestPlayer()
+        local closestDistance = math.huge
+        local closest = nil
+        local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        local fov = config.FOV or 150
+        local hitPartName = config.HitPart or "Head"
 
-    if not actor then
-        warn("[ENI] Could not get or create actor for silent aim")
-        SilentAimRunning = false
-        return
-    end
+        for _, v in pairs(Players:GetPlayers()) do
+            if not IsValidTarget(v) then continue end
+            local char = v.Character
+            local targetPart = char:FindFirstChild(hitPartName)
+            if not targetPart then targetPart = char:FindFirstChild("Head") end
+            if not targetPart then continue end
 
-    run_on_actor(actor, [=[
-        local Players = game:GetService("Players")
-        local RunService = game:GetService("RunService")
-        local Workspace = game:GetService("Workspace")
-        local LocalPlayer = Players.LocalPlayer
-        local Camera = Workspace.CurrentCamera
-        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+            local origin = Camera.CFrame.Position
+            local direction = targetPart.Position - origin
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances = {LocalPlayer.Character}
+            params.IgnoreWater = true
+            local result = Workspace:Raycast(origin, direction, params)
+            if result and not result.Instance:IsDescendantOf(char) then continue end
 
-        getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
-        local config = getgenv().__SilentAimConfig
-        local target = nil
-
-        local function IsValidTarget(plr)
-            if plr == LocalPlayer then return false end
-            if not plr.Character then return false end
-            local char = plr.Character
-            local humanoid = char:FindFirstChildOfClass("Humanoid")
-            if not humanoid or humanoid.Health <= 0 then return false end
-            local spawned = char:FindFirstChild("Spawned")
-            if spawned and not spawned.Value then return false end
-            local status = char:FindFirstChild("Status")
-            if status then
-                local alive = status:FindFirstChild("Alive")
-                if alive and not alive.Value then return false end
+            local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+            if not onScreen then continue end
+            local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
+            if dist < closestDistance and dist < fov then
+                closestDistance = dist
+                closest = targetPart
             end
-            if config.TeamCheck ~= false then
-                local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
-                local ffa = wkspc and wkspc:FindFirstChild("FFA")
-                if not (ffa and ffa.Value) then
-                    if plr.Team == LocalPlayer.Team then return false end
-                end
-            end
-            return true
         end
 
-        local function PredictPosition(part)
-            if not part then return nil end
-            if not config.Prediction then return part.Position end
-            local velocity = part.AssemblyLinearVelocity or Vector3.new()
-            local distance = (part.Position - Camera.CFrame.Position).Magnitude
-            local bulletSpeed = 3000
-            local travelTime = distance / bulletSpeed
-            local ping = LocalPlayer:GetNetworkPing() or 0
-            return part.Position + (velocity * (travelTime + ping * 0.5))
-        end
-
-        local function GetClosestPlayer()
-            local closestDistance = math.huge
-            local closest = nil
-            local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-            local fov = config.FOV or 150
-            local hitPartName = config.HitPart or "Head"
-
-            for _, v in pairs(Players:GetPlayers()) do
-                if not IsValidTarget(v) then continue end
-                local char = v.Character
-                local targetPart = char:FindFirstChild(hitPartName)
-                if not targetPart then targetPart = char:FindFirstChild("Head") end
-                if not targetPart then continue end
-
-                local origin = Camera.CFrame.Position
-                local direction = targetPart.Position - origin
-                local params = RaycastParams.new()
-                params.FilterType = Enum.RaycastFilterType.Exclude
-                params.FilterDescendantsInstances = {LocalPlayer.Character}
-                params.IgnoreWater = true
-                local result = Workspace:Raycast(origin, direction, params)
-                if result and not result.Instance:IsDescendantOf(char) then continue end
-
-                local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                if not onScreen then continue end
-                local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
-                if dist < closestDistance and dist < fov then
-                    closestDistance = dist
-                    closest = targetPart
-                end
-            end
-
-            if closest and closest.Parent and config.BodyHitEnabled then
-                local chance = config.BodyHitChance or 0
-                if math.random(1, 100) <= chance then
-                    local bodyParts = {"UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"}
-                    for _, partName in ipairs(bodyParts) do
-                        local part = closest.Parent:FindFirstChild(partName)
-                        if part then
-                            closest = part
-                            break
-                        end
+        if closest and closest.Parent and config.BodyHitEnabled then
+            local chance = config.BodyHitChance or 0
+            if math.random(1, 100) <= chance then
+                local bodyParts = {"UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"}
+                for _, partName in ipairs(bodyParts) do
+                    local part = closest.Parent:FindFirstChild(partName)
+                    if part then
+                        closest = part
+                        break
                     end
                 end
             end
-
-            return closest
         end
 
-        RunService.RenderStepped:Connect(function()
-            if config.Enabled == false then
-                target = nil
-                return
+        return closest
+    end
+
+    -- Update target every frame
+    local target = nil
+    RunService.RenderStepped:Connect(function()
+        if config.Enabled == false then
+            target = nil
+            return
+        end
+        target = GetClosestPlayer()
+    end)
+
+    -- Hook the Raycast function directly (no actor needed)
+    local old
+    old = hookfunction(RaycastFunction, function(ray, ignoreList, ...)
+        if target and target.Position and config.Enabled ~= false then
+            local aimPos = target.Position
+            if config.Prediction then
+                local velocity = target.AssemblyLinearVelocity or Vector3.new()
+                local distance = (target.Position - Camera.CFrame.Position).Magnitude
+                local bulletSpeed = 3000
+                local travelTime = distance / bulletSpeed
+                local ping = LocalPlayer:GetNetworkPing() or 0
+                aimPos = target.Position + (velocity * (travelTime + ping * 0.5))
             end
-            target = GetClosestPlayer()
-        end)
 
-        -- PATCHED: Hook the Raycast function directly
-        local RaycastFunction = nil
-        for _, v in pairs(getgc()) do
-            if type(v) == "function" and islclosure(v) then
-                local name = debug.info(v, "n")
-                local consts = debug.getconstants(v)
-                if name == "Raycast" and #consts == 7 and consts[1] == "FindPartOnRayWithIgnoreList" then
-                    RaycastFunction = v
-                    break
-                end
-            end
+            -- Create new ray pointing at target
+            local origin = ray.Origin
+            local direction = (aimPos - origin).Unit * (aimPos - origin).Magnitude
+            local newRay = Ray.new(origin, direction)
+
+            return old(newRay, ignoreList, ...)
         end
+        return old(ray, ignoreList, ...)
+    end)
 
-        if RaycastFunction then
-            local old
-            old = hookfunction(RaycastFunction, function(ray, ignoreList, ...)
-                if target and target.Position and config.Enabled ~= false then
-                    local aimPos = target.Position
-                    if config.Prediction then
-                        local velocity = target.AssemblyLinearVelocity or Vector3.new()
-                        local distance = (target.Position - Camera.CFrame.Position).Magnitude
-                        local bulletSpeed = 3000
-                        local travelTime = distance / bulletSpeed
-                        local ping = LocalPlayer:GetNetworkPing() or 0
-                        aimPos = target.Position + (velocity * (travelTime + ping * 0.5))
-                    end
-
-                    -- Create new ray pointing at target
-                    local origin = ray.Origin
-                    local direction = (aimPos - origin).Unit * (aimPos - origin).Magnitude
-                    local newRay = Ray.new(origin, direction)
-
-                    return old(newRay, ignoreList, ...)
-                end
-                return old(ray, ignoreList, ...)
-            end)
-            print("[ENI] Silent aim hooked successfully!")
-        else
-            warn("[ENI] Raycast function not found in actor")
-        end
-    ]=])
+    print("[ENI] Silent aim hooked successfully!")
 end
 
 local function StopSilentAim()
