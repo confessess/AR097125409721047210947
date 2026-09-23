@@ -1,590 +1,714 @@
--- ============================================================
--- Arsenal Modular -- Combat (FIXED for new bullet system)
--- Legit aimbot, silent aim, ragebot, triggerbot
--- ============================================================
-
 local Combat = {}
+Combat.__index = Combat
 
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local Camera = workspace.CurrentCamera
-local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local SoundService = game:GetService("SoundService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local Config, Utils, GUI, Core
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
 
--- State
-local aimbotTarget = nil
-local silentAimTarget = nil
-local ragebotConn = nil
-local triggerbotLastClick = 0
+Combat.Config = {
+    AimbotEnabled = false,
+    AimbotToggleMode = false,
+    AimbotToggleKey = Enum.KeyCode.X,
+    AimbotActive = false,
+    SilentAimEnabled = false,
+    SilentAimFOV = 150,
+    SilentAimHitPart = "Head",
+    SilentAimPrediction = false,
+    HitboxEnabled = false,
+    TeamCheck = true,
+    WallCheck = false,
+    FOV = 25,
+    HitPart = "Head",
+    HitboxSize = 13,
+    HeadHBSize = 20,
+    AimKey = Enum.UserInputType.MouseButton2,
+    KillAll = false,
+    HitsoundsEnabled = false,
+    Hitsound = "Skeet.cc",
+    HitsoundVolume = 1,
+    BodyHitEnabled = false,
+    BodyHitChance = 30,
+}
 
--- FOV circles
-local aimbotFOVCircle = nil
-local silentAimFOVCircle = nil
+local FOV_Circle = Drawing.new("Circle")
+FOV_Circle.Color = Color3.fromRGB(255, 255, 255)
+FOV_Circle.Thickness = 1
+FOV_Circle.Filled = false
+FOV_Circle.NumSides = 100
+FOV_Circle.Transparency = 1
+FOV_Circle.Radius = 25
+FOV_Circle.Visible = false
 
--- Keybind
-local aimbotKeybind = nil
-local aimbotKeyDown = false
+local SilentFOV_Circle = Drawing.new("Circle")
+SilentFOV_Circle.Color = Color3.fromRGB(255, 60, 60)
+SilentFOV_Circle.Thickness = 1
+SilentFOV_Circle.Filled = false
+SilentFOV_Circle.NumSides = 100
+SilentFOV_Circle.Transparency = 0.5
+SilentFOV_Circle.Radius = 150
+SilentFOV_Circle.Visible = false
 
--- Silent Aim State
-local SilentAimRunning = false
-local RaycastFunction = nil
-local OriginalRaycast = nil
-
--- Helper functions
-local function isKeybindPressed()
-    if not aimbotKeybind then return false end
-    if typeof(aimbotKeybind) == "EnumItem" then
-        if aimbotKeybind.EnumType == Enum.UserInputType then
-            return UserInputService:IsMouseButtonPressed(aimbotKeybind)
-        elseif aimbotKeybind.EnumType == Enum.KeyCode then
-            return UserInputService:IsKeyDown(aimbotKeybind)
-        end
+local function IsVisible(targetPart)
+    if not Combat.Config.WallCheck then return true end
+    if not targetPart then return false end
+    local origin = Camera.CFrame.Position
+    local direction = targetPart.Position - origin
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, targetPart.Parent}
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.IgnoreWater = true
+    local result = Workspace:Raycast(origin, direction, raycastParams)
+    if result == nil then return true end
+    if result.Instance and result.Instance:IsDescendantOf(targetPart.Parent) then
+        return true
     end
     return false
 end
 
-local function formatKeybind(kb)
-    if not kb then return "None" end
-    if typeof(kb) == "EnumItem" then
-        local str = tostring(kb)
-        return str:match("%.(%w+)$") or str
-    end
-    return tostring(kb)
-end
+local IsAiming = false
 
--- ------------------------------------------------------------
--- Silent Aim - Find and Hook Raycast
--- ------------------------------------------------------------
-
-local function FindRaycastFunction()
-    for _, v in pairs(getgc()) do
-        if type(v) == "function" and islclosure(v) then
-            local name = debug.info(v, "n")
-            local consts = debug.getconstants(v)
-
-            -- Look for Raycast function with Arsenal's signature
-            if name == "Raycast" 
-                and #consts == 7 
-                and consts[1] == "FindPartOnRayWithIgnoreList" then
-                return v
-            end
-        end
-    end
-    return nil
-end
-
-local function GetSilentAimTarget()
-    local mousePos = UserInputService:GetMouseLocation()
-    local closest = nil
-    local closestDist = Config.Get("SilentAim_FOVSize") or 250
-
-    local teamCheck = Config.Get("SilentAim_TeamCheck") ~= false
-    local hitPart = Config.Get("SilentAim_HitPart") or "Head"
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            -- Team check
-            if teamCheck and player.Team == LocalPlayer.Team then
-                continue
-            end
-
-            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-            local targetPart = player.Character:FindFirstChild(hitPart)
-
-            if humanoid and humanoid.Health > 0 and targetPart then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                if onScreen then
-                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                    if dist < closestDist then
-                        closest = targetPart
-                        closestDist = dist
-                    end
-                end
-            end
-        end
-    end
-
-    return closest
-end
-
-local function HookRaycast()
-    if not RaycastFunction then
-        warn("[Combat] Raycast function not found!")
-        return false
-    end
-
-    OriginalRaycast = RaycastFunction
-
-    local newRaycast = function(ray, ignoreList, ...)
-        -- Call original
-        local hitPart, hitPos, hitNormal, hitMaterial = OriginalRaycast(ray, ignoreList, ...)
-
-        -- If silent aim is enabled, redirect hit
-        if Config.Get("SilentAim_Enabled") then
-            local target = GetSilentAimTarget()
-            if target then
-                local targetPos = target.Position
-                local direction = (targetPos - ray.Origin).Unit
-                return target, targetPos, direction, hitMaterial
-            end
-        end
-
-        return hitPart, hitPos, hitNormal, hitMaterial
-    end
-
-    -- Hook the function
-    if hookfunction then
-        local success, err = pcall(function()
-            hookfunction(RaycastFunction, newRaycast)
-        end)
-        if success then
-            print("[Combat] Silent aim hooked successfully!")
-            return true
-        else
-            warn("[Combat] Failed to hook: " .. tostring(err))
-            return false
-        end
-    else
-        warn("[Combat] hookfunction not available!")
-        return false
-    end
-end
-
--- ------------------------------------------------------------
--- Target selection
--- ------------------------------------------------------------
-
-local function isValidTarget(player)
-    if not player or player == LocalPlayer then return false end
-    if not player.Character then return false end
-    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+local function IsValidTarget(plr)
+    if plr == LocalPlayer then return false end
+    if not plr.Character then return false end
+    local char = plr.Character
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
     if not humanoid or humanoid.Health <= 0 then return false end
+    local spawned = char:FindFirstChild("Spawned")
+    if spawned and not spawned.Value then return false end
+    local status = char:FindFirstChild("Status")
+    if status then
+        local alive = status:FindFirstChild("Alive")
+        if alive and not alive.Value then return false end
+    end
+    local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
+    local ffa = wkspc and wkspc:FindFirstChild("FFA")
+    local isFFA = ffa and ffa.Value
+    if Combat.Config.TeamCheck and not isFFA then
+        if plr.Team == LocalPlayer.Team then return false end
+    end
     return true
 end
 
-local function getAimbotTarget()
-    local crosshair = UserInputService:GetMouseLocation()
-    if not LocalPlayer.Character then return nil end
-    local localRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not localRoot then return nil end
-
-    local fovSize = Config.Get("Aimbot_FOVSize") or 250
-    local wallCheck = Config.Get("Aimbot_WallCheck") == true
-    local teamCheck = Config.Get("Aimbot_TeamCheck") ~= false
-    local aimPart = Config.Get("Aimbot_AimPart") or "Head"
-
-    -- Sticky aim
-    if Config.Get("Aimbot_StickyAim") and aimbotTarget then
-        if isValidTarget(aimbotTarget) then
-            if teamCheck and aimbotTarget.Team == LocalPlayer.Team then
-                aimbotTarget = nil
-            else
-                local part = aimbotTarget.Character:FindFirstChild(aimPart)
-                if part then
-                    if wallCheck then
-                        -- Simple LOS check
-                        local ray = Ray.new(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position).Unit * 1000)
-                        local hit, pos = Workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, aimbotTarget.Character})
-                        if not hit or hit:IsDescendantOf(aimbotTarget.Character) then
-                            return aimbotTarget
-                        else
-                            aimbotTarget = nil
-                        end
-                    else
-                        return aimbotTarget
-                    end
-                else
-                    aimbotTarget = nil
-                end
-            end
-        else
-            aimbotTarget = nil
-        end
-    end
-
-    local best = nil
-    local bestDist = math.huge
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        if teamCheck and player.Team == LocalPlayer.Team then continue end
-        if not isValidTarget(player) then continue end
-
-        local part = player.Character:FindFirstChild(aimPart)
-        if not part then continue end
-
-        if wallCheck then
-            local ray = Ray.new(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position).Unit * 1000)
-            local hit, pos = Workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, player.Character})
-            if hit and not hit:IsDescendantOf(player.Character) then continue end
-        end
-
-        local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+local function GetClosestEnemy()
+    local closestDist = Combat.Config.FOV
+    local closestTarget = nil
+    local mousePos = UserInputService:GetMouseLocation()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if not IsValidTarget(plr) then continue end
+        local char = plr.Character
+        local targetPart = char:FindFirstChild(Combat.Config.HitPart)
+        if not targetPart then targetPart = char:FindFirstChild("Head") end
+        if not targetPart then continue end
+        if not IsVisible(targetPart) then continue end
+        local pos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
         if not onScreen then continue end
-
-        local dist2d = (Vector2.new(screenPos.X, screenPos.Y) - crosshair).Magnitude
-        if dist2d <= fovSize and dist2d < bestDist then
-            best = player
-            bestDist = dist2d
+        local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+        if dist < closestDist then
+            closestDist = dist
+            closestTarget = plr
         end
     end
-
-    aimbotTarget = best
-    return best
+    return closestTarget
 end
 
--- ------------------------------------------------------------
--- Aim application
--- ------------------------------------------------------------
+--// ═══════════════════════════════════════════════════════════════
+--//  SILENT AIM — Original Z3US method (strict signature)
+--// ═══════════════════════════════════════════════════════════════
+local SilentAimRunning = false
 
-local function applyAim(target)
-    if not target or not target.Character then return end
-    local aimPart = Config.Get("Aimbot_AimPart") or "Head"
-    local part = target.Character:FindFirstChild(aimPart)
-    if not part then return end
+local function StartSilentAim()
+    if SilentAimRunning then return end
+    SilentAimRunning = true
 
-    local useSmooth = Config.Get("Aimbot_Smoothness") == true
-    local smoothValue = Config.Get("Aimbot_SmoothValue") or 5
-
-    local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
-    if not onScreen then return end
-
-    local vp = Camera.ViewportSize
-    local center = Vector2.new(vp.X / 2, vp.Y / 2)
-    local delta = Vector2.new(screenPos.X, screenPos.Y) - center
-
-    if useSmooth and smoothValue > 0 then
-        delta = delta / (smoothValue + 1)
-    end
-
-    pcall(function()
-        mousemoverel(delta.X, delta.Y)
-    end)
-end
-
--- ------------------------------------------------------------
--- Update loops
--- ------------------------------------------------------------
-
-local function updateAimbot()
-    if not Config.Get("Aimbot_Enabled") then
-        if aimbotFOVCircle then aimbotFOVCircle.Visible = false end
+    local actor = getactors and getactors()[1]
+    if not actor then
+        warn("[ENI] No actor found for silent aim")
+        SilentAimRunning = false
         return
     end
 
-    -- Show FOV circle
-    if Config.Get("Aimbot_ShowFOV") then
-        if not aimbotFOVCircle then
-            aimbotFOVCircle = Drawing.new("Circle")
-            aimbotFOVCircle.Thickness = 1
-            aimbotFOVCircle.Color = Color3.fromRGB(124, 108, 255)
-            aimbotFOVCircle.Transparency = 0.5
-            aimbotFOVCircle.Filled = false
-            aimbotFOVCircle.NumSides = 64
+    run_on_actor(actor, [=[
+        local Players = game:GetService("Players")
+        local RunService = game:GetService("RunService")
+        local Workspace = game:GetService("Workspace")
+        local LocalPlayer = Players.LocalPlayer
+        local Camera = Workspace.CurrentCamera
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+        getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
+        local config = getgenv().__SilentAimConfig
+        local target = nil
+
+        local function IsValidTarget(plr)
+            if plr == LocalPlayer then return false end
+            if not plr.Character then return false end
+            local char = plr.Character
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if not humanoid or humanoid.Health <= 0 then return false end
+            local spawned = char:FindFirstChild("Spawned")
+            if spawned and not spawned.Value then return false end
+            local status = char:FindFirstChild("Status")
+            if status then
+                local alive = status:FindFirstChild("Alive")
+                if alive and not alive.Value then return false end
+            end
+            if config.TeamCheck ~= false then
+                local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
+                local ffa = wkspc and wkspc:FindFirstChild("FFA")
+                if not (ffa and ffa.Value) then
+                    if plr.Team == LocalPlayer.Team then return false end
+                end
+            end
+            return true
         end
-        local mousePos = UserInputService:GetMouseLocation()
-        aimbotFOVCircle.Position = mousePos
-        aimbotFOVCircle.Radius = Config.Get("Aimbot_FOVSize") or 250
-        aimbotFOVCircle.Visible = true
-    elseif aimbotFOVCircle then
-        aimbotFOVCircle.Visible = false
-    end
 
-    if not isKeybindPressed() then
-        if not Config.Get("Aimbot_StickyAim") then
-            aimbotTarget = nil
+        local function PredictPosition(part)
+            if not part then return nil end
+            if not config.Prediction then return part.Position end
+            local velocity = part.AssemblyLinearVelocity or Vector3.new()
+            local distance = (part.Position - Camera.CFrame.Position).Magnitude
+            local bulletSpeed = 3000
+            local travelTime = distance / bulletSpeed
+            local ping = LocalPlayer:GetNetworkPing() or 0
+            return part.Position + (velocity * (travelTime + ping * 0.5))
         end
-        return
-    end
 
-    local target = getAimbotTarget()
-    if target then
-        applyAim(target)
-    end
-end
-
-local function updateSilentAim()
-    if not Config.Get("SilentAim_Enabled") then
-        if silentAimFOVCircle then silentAimFOVCircle.Visible = false end
-        return
-    end
-
-    -- Show FOV circle
-    if Config.Get("SilentAim_UseFOV") then
-        if not silentAimFOVCircle then
-            silentAimFOVCircle = Drawing.new("Circle")
-            silentAimFOVCircle.Thickness = 1
-            silentAimFOVCircle.Color = Color3.fromRGB(255, 0, 0)
-            silentAimFOVCircle.Transparency = 0.5
-            silentAimFOVCircle.Filled = false
-            silentAimFOVCircle.NumSides = 64
-        end
-        local mousePos = UserInputService:GetMouseLocation()
-        silentAimFOVCircle.Position = mousePos
-        silentAimFOVCircle.Radius = Config.Get("SilentAim_FOVSize") or 250
-        silentAimFOVCircle.Visible = true
-    elseif silentAimFOVCircle then
-        silentAimFOVCircle.Visible = false
-    end
-end
-
-local function updateRagebot()
-    if not Config.Get("Ragebot_Enabled") then
-        if ragebotConn then
-            ragebotConn:Disconnect()
-            ragebotConn = nil
-        end
-        return
-    end
-
-    if not ragebotConn then
-        ragebotConn = RunService.RenderStepped:Connect(function()
-            if not Config.Get("Ragebot_Enabled") then return end
-            if not LocalPlayer.Character then return end
-
-            -- Find closest target
+        local function GetClosestPlayer()
+            local closestDistance = math.huge
             local closest = nil
-            local closestDist = math.huge
-            local localRoot = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+            local fov = config.FOV or 150
+            local hitPartName = config.HitPart or "Head"
 
-            if not localRoot then return end
+            for _, v in pairs(Players:GetPlayers()) do
+                if not IsValidTarget(v) then continue end
+                local char = v.Character
+                local targetPart = char:FindFirstChild(hitPartName)
+                if not targetPart then targetPart = char:FindFirstChild("Head") end
+                if not targetPart then continue end
 
-            for _, player in ipairs(Players:GetPlayers()) do
-                if player ~= LocalPlayer and player.Character and player.Team ~= LocalPlayer.Team then
-                    local root = player.Character:FindFirstChild("HumanoidRootPart")
-                    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-                    if root and humanoid and humanoid.Health > 0 then
-                        local dist = (root.Position - localRoot.Position).Magnitude
-                        if dist < closestDist then
-                            closest = player
-                            closestDist = dist
+                local origin = Camera.CFrame.Position
+                local direction = targetPart.Position - origin
+                local params = RaycastParams.new()
+                params.FilterType = Enum.RaycastFilterType.Exclude
+                params.FilterDescendantsInstances = {LocalPlayer.Character}
+                params.IgnoreWater = true
+                local result = Workspace:Raycast(origin, direction, params)
+                if result and not result.Instance:IsDescendantOf(char) then continue end
+
+                local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                if not onScreen then continue end
+                local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
+                if dist < closestDistance and dist < fov then
+                    closestDistance = dist
+                    closest = targetPart
+                end
+            end
+
+            if closest and closest.Parent and config.BodyHitEnabled then
+                local chance = config.BodyHitChance or 0
+                if math.random(1, 100) <= chance then
+                    local bodyParts = {"UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"}
+                    for _, partName in ipairs(bodyParts) do
+                        local part = closest.Parent:FindFirstChild(partName)
+                        if part then
+                            closest = part
+                            break
                         end
                     end
                 end
             end
 
-            if closest then
-                local head = closest.Character:FindFirstChild("Head")
-                if head then
-                    -- Check LOS
-                    local ray = Ray.new(Camera.CFrame.Position, (head.Position - Camera.CFrame.Position).Unit * 1000)
-                    local hit, pos = Workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character, closest.Character})
-                    if not hit or hit:IsDescendantOf(closest.Character) then
-                        pcall(function()
-                            mouse1click()
-                        end)
-                    end
-                end
+            return closest
+        end
+
+        RunService.RenderStepped:Connect(function()
+            if config.Enabled == false then
+                target = nil
+                return
             end
+            target = GetClosestPlayer()
         end)
-    end
-end
 
-local function updateTriggerbot()
-    if not Config.Get("Triggerbot_Enabled") then return end
-
-    local delay = Config.Get("Triggerbot_Delay") or 0
-    local chance = Config.Get("Triggerbot_Chance") or 100
-    local teamCheck = Config.Get("Triggerbot_TeamCheck") ~= false
-
-    local now = tick()
-    if delay > 0 and now - triggerbotLastClick < delay then return end
-
-    local mouse = LocalPlayer:GetMouse()
-    local target = mouse.Target
-    if not target then return end
-
-    local model = target:FindFirstAncestorWhichIsA("Model")
-    if not model then return end
-
-    local humanoid = model:FindFirstChildOfClass("Humanoid")
-    if not humanoid or humanoid.Health <= 0 then return end
-
-    if teamCheck then
-        local player = Players:GetPlayerFromCharacter(model)
-        if player and player.Team == LocalPlayer.Team then return end
-    end
-
-    if math.random(1, 100) > chance then return end
-
-    pcall(function()
-        mouse1click()
-    end)
-    triggerbotLastClick = now
-end
-
--- ------------------------------------------------------------
--- Main Update
--- ------------------------------------------------------------
-
-function Combat.Update()
-    if Core.Unloaded then return end
-
-    updateAimbot()
-    updateSilentAim()
-    updateRagebot()
-    updateTriggerbot()
-end
-
--- ------------------------------------------------------------
--- Initialize Silent Aim
--- ------------------------------------------------------------
-
-local function InitSilentAim()
-    print("[Combat] Initializing silent aim...")
-    RaycastFunction = FindRaycastFunction()
-    if RaycastFunction then
-        print("[Combat] Found Raycast function")
-        if HookRaycast() then
-            SilentAimRunning = true
+        for i, v in pairs(getgc()) do
+            if type(v) == "function" and islclosure(v) then
+                if debug.info(v, "a") == 2 and #debug.getupvalues(v) == 2 and #debug.getconstants(v) == 17 and debug.info(v, "n"):len() <= 10 then
+                    local old
+                    old = hookfunction(v, function(p1, p2)
+                        if target and target.Position and config.Enabled ~= false then
+                            local mychar = LocalPlayer.Character
+                            if mychar then
+                                local head = mychar:FindFirstChild("Head")
+                                if head then
+                                    local aimPos = target.Position
+                                    if config.Prediction then
+                                        local velocity = target.AssemblyLinearVelocity or Vector3.new()
+                                        local distance = (target.Position - Camera.CFrame.Position).Magnitude
+                                        local bulletSpeed = 3000
+                                        local travelTime = distance / bulletSpeed
+                                        local ping = LocalPlayer:GetNetworkPing() or 0
+                                        aimPos = target.Position + (velocity * (travelTime + ping * 0.5))
+                                    end
+                                    local direction = (aimPos - head.Position)
+                                    p1 = Ray.new(head.Position, direction)
+                                end
+                            end
+                        end
+                        return old(p1, p2)
+                    end)
+                end
+            end
         end
+    ]=])
+end
+
+local function StopSilentAim()
+    SilentAimRunning = false
+    getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
+    getgenv().__SilentAimConfig.Enabled = false
+end
+
+--// Input handlers
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType == Combat.Config.AimKey then
+        IsAiming = true
+    end
+    if Combat.Config.AimbotToggleMode then
+        local key = Combat.Config.AimbotToggleKey
+        if typeof(key) == "EnumItem" then
+            if key.EnumType == Enum.KeyCode and input.KeyCode == key then
+                Combat.Config.AimbotActive = not Combat.Config.AimbotActive
+            elseif key.EnumType == Enum.UserInputType and input.UserInputType == key then
+                Combat.Config.AimbotActive = not Combat.Config.AimbotActive
+            end
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Combat.Config.AimKey then
+        IsAiming = false
+    end
+end)
+
+--// Main render loop
+RunService.RenderStepped:Connect(function()
+    local mousePos = UserInputService:GetMouseLocation()
+    FOV_Circle.Position = Vector2.new(mousePos.X, mousePos.Y)
+    FOV_Circle.Radius = Combat.Config.FOV
+    FOV_Circle.Visible = Combat.Config.AimbotEnabled
+    SilentFOV_Circle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    SilentFOV_Circle.Radius = Combat.Config.SilentAimFOV
+    SilentFOV_Circle.Visible = Combat.Config.SilentAimEnabled
+
+    getgenv().__SilentAimConfig = {
+        Enabled = Combat.Config.SilentAimEnabled,
+        FOV = Combat.Config.SilentAimFOV,
+        TeamCheck = Combat.Config.TeamCheck,
+        BodyHitEnabled = Combat.Config.BodyHitEnabled,
+        BodyHitChance = Combat.Config.BodyHitChance,
+        HitPart = Combat.Config.SilentAimHitPart,
+        Prediction = Combat.Config.SilentAimPrediction,
+    }
+
+    local shouldAim = false
+    if Combat.Config.AimbotEnabled then
+        if Combat.Config.AimbotToggleMode then
+            shouldAim = Combat.Config.AimbotActive
+        else
+            shouldAim = IsAiming
+        end
+    end
+
+    if shouldAim then
+        local target = GetClosestEnemy()
+        if target and target.Character then
+            local targetPart = target.Character:FindFirstChild(Combat.Config.HitPart)
+            if not targetPart then targetPart = target.Character:FindFirstChild("Head") end
+            if targetPart then
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPart.Position)
+            end
+        end
+    end
+
+end)
+
+--// Hitbox Expander
+local OriginalData = {}
+
+local function ExpandHitboxes()
+    if not Combat.Config.HitboxEnabled then return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr == LocalPlayer then continue end
+        if Combat.Config.TeamCheck and plr.Team == LocalPlayer.Team then continue end
+        local char = plr.Character
+        if not char then continue end
+        local partsToExpand = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart"}
+        for _, partName in ipairs(partsToExpand) do
+            local part = char:FindFirstChild(partName)
+            if part and part:IsA("BasePart") then
+                if not OriginalData[part] then
+                    OriginalData[part] = {Size = part.Size, Transparency = part.Transparency}
+                end
+                local targetSize = (partName == "HeadHB") and
+                    Vector3.new(Combat.Config.HeadHBSize, Combat.Config.HeadHBSize, Combat.Config.HeadHBSize) or
+                    Vector3.new(Combat.Config.HitboxSize, Combat.Config.HitboxSize, Combat.Config.HitboxSize)
+                part.Size = targetSize
+                part.Transparency = 1
+            end
+        end
+    end
+end
+
+local function RestoreHitboxes()
+    for part, data in pairs(OriginalData) do
+        if part and part.Parent then
+            part.Size = data.Size
+            part.Transparency = data.Transparency
+        end
+    end
+    OriginalData = {}
+end
+
+RunService.RenderStepped:Connect(function()
+    if Combat.Config.HitboxEnabled then
+        ExpandHitboxes()
     else
-        warn("[Combat] Could not find Raycast function - silent aim disabled")
+        RestoreHitboxes()
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+    if plr.Character then
+        for _, part in ipairs(plr.Character:GetDescendants()) do
+            if OriginalData[part] then OriginalData[part] = nil end
+        end
+    end
+end)
+
+--// HITSOUNDS
+local HitsoundList = {
+    ["None"] = "", ["Skeet.cc"] = "rbxassetid://5447626464", ["Neverlose"] = "rbxassetid://6607204501",
+    ["Baimware"] = "rbxassetid://6607339542", ["Old Fatality"] = "rbxassetid://6607142036",
+    ["Rust"] = "rbxassetid://5043539486", ["Bell"] = "rbxassetid://6534947240",
+    ["TF2"] = "rbxassetid://2868331684", ["Among Us"] = "rbxassetid://5700183626",
+    ["Fortnite Headshot"] = "rbxassetid://2513174484", ["Minecraft"] = "rbxassetid://4018616850",
+    ["Osu"] = "rbxassetid://7149255551", ["TF2 Critical"] = "rbxassetid://296102734",
+    ["Bat"] = "rbxassetid://3333907347", ["Call of Duty"] = "rbxassetid://5952120301",
+    ["Bruh"] = "rbxassetid://4275842574", ["Crowbar"] = "rbxassetid://546410481",
+    ["Weeb"] = "rbxassetid://6442965016", ["Steve"] = "rbxassetid://4965083997"
+}
+
+local function PlayHitsound()
+    if not Combat.Config.HitsoundsEnabled then return end
+    local soundId = HitsoundList[Combat.Config.Hitsound]
+    if not soundId or soundId == "" then return end
+    local sound = Instance.new("Sound")
+    sound.SoundId = soundId
+    sound.Volume = Combat.Config.HitsoundVolume
+    sound.Parent = SoundService
+    sound:Play()
+    sound.Ended:Connect(function() sound:Destroy() end)
+end
+
+local function SetupHitsounds()
+    local scoreFolder = LocalPlayer:WaitForChild("ScoreFolder")
+    local damageValue = scoreFolder:WaitForChild("Damage")
+    damageValue:GetPropertyChangedSignal("Value"):Connect(function(newValue)
+        if newValue == 0 then return end
+        PlayHitsound()
+    end)
+    LocalPlayer.ChildRemoved:Connect(function(child)
+        if child.Name == "ScoreFolder" then
+            task.wait(3)
+            pcall(SetupHitsounds)
+        end
+    end)
+end
+
+task.spawn(function()
+    local success = pcall(SetupHitsounds)
+    if not success then
+        task.wait(5)
+        pcall(SetupHitsounds)
+    end
+end)
+
+--// KILL ALL
+local killAllConnection = nil
+local killAllActive = false
+
+local function GetClosestEnemyForKillAll()
+    local closest = nil
+    local closestDist = math.huge
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return nil end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Team ~= LocalPlayer.Team then
+            local char = player.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+            if root and humanoid and humanoid.Health > 0 then
+                local dist = (root.Position - myRoot.Position).Magnitude
+                if dist < closestDist then
+                    closestDist = dist
+                    closest = player
+                end
+            end
+        end
+    end
+    return closest
+end
+
+local function KillAllTick()
+    if not killAllActive then return end
+    local target = GetClosestEnemyForKillAll()
+    if target and target.Character then
+        local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
+        local myChar = LocalPlayer.Character
+        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if targetRoot and myRoot then
+            myRoot.CFrame = CFrame.new(targetRoot.Position - targetRoot.CFrame.LookVector * 5)
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetRoot.Position)
+        end
     end
 end
 
--- ------------------------------------------------------------
--- Lifecycle
--- ------------------------------------------------------------
+local function SetKillAll(enabled)
+    killAllActive = enabled
+    Combat.Config.KillAll = enabled
+    if enabled then
+        if killAllConnection then killAllConnection:Disconnect() end
+        killAllConnection = RunService.Heartbeat:Connect(KillAllTick)
+    else
+        if killAllConnection then
+            killAllConnection:Disconnect()
+            killAllConnection = nil
+        end
+    end
+end
 
-function Combat.Init(deps)
-    Config = deps.Config
-    Utils = deps.Utils
-    GUI = deps.GUI
-    Core = deps.Core
+--// GUI KEYBIND CAPTURE
+local DARK_PANEL = Color3.fromRGB(14, 14, 14)
+local BORDER = Color3.fromRGB(65, 25, 27)
+local RED = Color3.fromRGB(145, 20, 25)
+local RED_BRIGHT = Color3.fromRGB(195, 28, 35)
+local WHITE = Color3.fromRGB(255, 255, 255)
+local LIGHT = Color3.fromRGB(225, 225, 225)
+local GRAY = Color3.fromRGB(150, 150, 150)
+local HOVER = Color3.fromRGB(18, 7, 8)
+local SELECTED = Color3.fromRGB(45, 15, 17)
 
-    -- Initialize silent aim
-    task.spawn(function()
-        task.wait(1) -- Wait for game to load
-        InitSilentAim()
+local WaitingForAimKey = false
+local AimKeyButton = nil
+
+local function GetKeyDisplayName(key)
+    if not key then return "None" end
+    if typeof(key) == "EnumItem" then
+        if key.EnumType == Enum.KeyCode then
+            return key.Name
+        elseif key.EnumType == Enum.UserInputType then
+            if key == Enum.UserInputType.MouseButton1 then return "LMB" end
+            if key == Enum.UserInputType.MouseButton2 then return "RMB" end
+            if key == Enum.UserInputType.MouseButton3 then return "MMB" end
+            return key.Name
+        end
+    end
+    return tostring(key)
+end
+
+local function UpdateAimKeyButtonText()
+    if not AimKeyButton then return end
+    AimKeyButton.Text = "Bind: " .. GetKeyDisplayName(Combat.Config.AimbotToggleKey)
+end
+
+local function CreateKeybindCapture(g, y)
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(1, 0, 0, 36)
+    Frame.Position = UDim2.fromOffset(0, y)
+    Frame.BackgroundTransparency = 1
+    Frame.ZIndex = 3
+    Frame.Parent = g.Content
+
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, -140, 0, 36)
+    Label.BackgroundTransparency = 1
+    Label.Text = "Aimbot Toggle Key"
+    Label.TextColor3 = LIGHT
+    Label.TextSize = 13
+    Label.Font = Enum.Font.GothamMedium
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.ZIndex = 4
+    Label.Parent = Frame
+
+    local Btn = Instance.new("TextButton")
+    Btn.Size = UDim2.fromOffset(120, 28)
+    Btn.Position = UDim2.new(1, -140, 0, 4)
+    Btn.BackgroundColor3 = DARK_PANEL
+    Btn.BorderSizePixel = 0
+    Btn.Text = "Bind: X"
+    Btn.TextColor3 = WHITE
+    Btn.TextSize = 11
+    Btn.Font = Enum.Font.GothamMedium
+    Btn.AutoButtonColor = false
+    Btn.ZIndex = 4
+    Btn.Parent = Frame
+
+    local Corner = Instance.new("UICorner")
+    Corner.CornerRadius = UDim.new(0, 6)
+    Corner.Parent = Btn
+
+    local Stroke = Instance.new("UIStroke")
+    Stroke.Color = BORDER
+    Stroke.Thickness = 1
+    Stroke.Parent = Btn
+
+    AimKeyButton = Btn
+    UpdateAimKeyButtonText()
+
+    Btn.MouseEnter:Connect(function()
+        if not WaitingForAimKey then
+            Btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+            Stroke.Color = RED
+        end
     end)
-
-    -- Input handling
-    UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
-        if aimbotKeybind then
-            if typeof(aimbotKeybind) == "EnumItem" then
-                if aimbotKeybind.EnumType == Enum.UserInputType and input.UserInputType == aimbotKeybind then
-                    aimbotKeyDown = true
-                elseif aimbotKeybind.EnumType == Enum.KeyCode and input.KeyCode == aimbotKeybind then
-                    aimbotKeyDown = true
-                end
-            end
+    Btn.MouseLeave:Connect(function()
+        if not WaitingForAimKey then
+            Btn.BackgroundColor3 = DARK_PANEL
+            Stroke.Color = BORDER
         end
     end)
 
-    UserInputService.InputEnded:Connect(function(input)
-        if aimbotKeybind then
-            if typeof(aimbotKeybind) == "EnumItem" then
-                if aimbotKeybind.EnumType == Enum.UserInputType and input.UserInputType == aimbotKeybind then
-                    aimbotKeyDown = false
-                elseif aimbotKeybind.EnumType == Enum.KeyCode and input.KeyCode == aimbotKeybind then
-                    aimbotKeyDown = false
-                end
-            end
-        end
+    Btn.MouseButton1Click:Connect(function()
+        if WaitingForAimKey then return end
+        WaitingForAimKey = true
+        Btn.Text = "Press a key..."
+        Btn.TextColor3 = RED_BRIGHT
+        Btn.BackgroundColor3 = SELECTED
+        Stroke.Color = RED_BRIGHT
     end)
 
-    -- Register GUI with the repo's actual tab builder API.
-    if not GUI or not GUI.SetTabRebuild then
-        warn("[Combat] GUI missing SetTabRebuild; skipping tab registration.")
-        return
+    return y + 42
+end
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not WaitingForAimKey then return end
+    if gameProcessed then return end
+
+    local captured = nil
+    if input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode ~= Enum.KeyCode.Unknown then
+        captured = input.KeyCode
+    elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+        captured = Enum.UserInputType.MouseButton1
+    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+        captured = Enum.UserInputType.MouseButton2
+    elseif input.UserInputType == Enum.UserInputType.MouseButton3 then
+        captured = Enum.UserInputType.MouseButton3
     end
 
-    GUI:SetTabRebuild("Combat", function(g)
+    if captured then
+        Combat.Config.AimbotToggleKey = captured
+        WaitingForAimKey = false
+        UpdateAimKeyButtonText()
+        if AimKeyButton then
+            AimKeyButton.TextColor3 = WHITE
+            AimKeyButton.BackgroundColor3 = DARK_PANEL
+            local stroke = AimKeyButton:FindFirstChildOfClass("UIStroke")
+            if stroke then stroke.Color = BORDER end
+        end
+    end
+end)
+
+function Combat:Init(Gui)
+    self.Gui = Gui
+    Gui:SetTabRebuild("Combat", function(g)
         local scroll = g:CreateScrollContent()
         local originalContent = g.Content
         g.Content = scroll
 
         local y = g:CreateSection("Aimbot", 0)
-        y = g:CreateToggle("Enabled", Config.Get("Aimbot_Enabled") or false, function(v)
-            Config.Set("Aimbot_Enabled", v)
+        y = g:CreateToggle("Aimbot", Combat.Config.AimbotEnabled, function(state)
+            Combat.Config.AimbotEnabled = state
         end, y)
-        y = g:CreateToggle("Wall Check", Config.Get("Aimbot_WallCheck") == true, function(v)
-            Config.Set("Aimbot_WallCheck", v)
+        y = g:CreateToggle("Toggle Mode", false, function(state)
+            Combat.Config.AimbotToggleMode = state
         end, y)
-        y = g:CreateToggle("Team Check", Config.Get("Aimbot_TeamCheck") ~= false, function(v)
-            Config.Set("Aimbot_TeamCheck", v)
+        y = CreateKeybindCapture(g, y)
+        y = g:CreateToggle("Team Check", Combat.Config.TeamCheck, function(state)
+            Combat.Config.TeamCheck = state
         end, y)
-        y = g:CreateToggle("Smoothness", Config.Get("Aimbot_Smoothness") == true, function(v)
-            Config.Set("Aimbot_Smoothness", v)
+        y = g:CreateToggle("Wall Check", Combat.Config.WallCheck, function(state)
+            Combat.Config.WallCheck = state
         end, y)
-        y = g:CreateToggle("Sticky Aim", Config.Get("Aimbot_StickyAim") == true, function(v)
-            Config.Set("Aimbot_StickyAim", v)
-        end, y)
-        y = g:CreateToggle("Show FOV", Config.Get("Aimbot_ShowFOV") == true, function(v)
-            Config.Set("Aimbot_ShowFOV", v)
-        end, y)
-        y = g:CreateDropdown("Aim Part", {"Head", "HumanoidRootPart", "Torso"}, Config.Get("Aimbot_AimPart") or "Head", function(v)
-            Config.Set("Aimbot_AimPart", v)
-        end, y)
-        y = g:CreateSlider("FOV Size", 0, 1000, Config.Get("Aimbot_FOVSize") or 250, function(v)
-            Config.Set("Aimbot_FOVSize", v)
-        end, y)
-        y = g:CreateSlider("Smooth Value", 0, 20, Config.Get("Aimbot_SmoothValue") or 5, function(v)
-            Config.Set("Aimbot_SmoothValue", v)
+        y = g:CreateSlider("FOV Radius", 10, 200, Combat.Config.FOV, function(val)
+            Combat.Config.FOV = val
         end, y)
 
         y = g:CreateSection("Silent Aim", y + 10)
-        y = g:CreateToggle("Enabled", Config.Get("SilentAim_Enabled") or false, function(v)
-            Config.Set("SilentAim_Enabled", v)
+        y = g:CreateToggle("Silent Aim", Combat.Config.SilentAimEnabled, function(state)
+            Combat.Config.SilentAimEnabled = state
+            if state then
+                StartSilentAim()
+            else
+                StopSilentAim()
+            end
         end, y)
-        y = g:CreateToggle("Team Check", Config.Get("SilentAim_TeamCheck") ~= false, function(v)
-            Config.Set("SilentAim_TeamCheck", v)
+        y = g:CreateSlider("Silent Aim FOV", 50, 500, Combat.Config.SilentAimFOV, function(val)
+            Combat.Config.SilentAimFOV = val
         end, y)
-        y = g:CreateToggle("Use FOV", Config.Get("SilentAim_UseFOV") == true, function(v)
-            Config.Set("SilentAim_UseFOV", v)
+        y = g:CreateDropdown("Hit Part", {"Head", "HumanoidRootPart"}, Combat.Config.SilentAimHitPart, function(val)
+            Combat.Config.SilentAimHitPart = val
         end, y)
-        y = g:CreateSlider("FOV Size", 50, 1000, Config.Get("SilentAim_FOVSize") or 250, function(v)
-            Config.Set("SilentAim_FOVSize", v)
+        y = g:CreateToggle("Prediction", Combat.Config.SilentAimPrediction, function(state)
+            Combat.Config.SilentAimPrediction = state
         end, y)
-        y = g:CreateDropdown("Hit Part", {"Head", "HumanoidRootPart", "Torso"}, Config.Get("SilentAim_HitPart") or "Head", function(v)
-            Config.Set("SilentAim_HitPart", v)
+        y = g:CreateToggle("Body Hit Redirection", Combat.Config.BodyHitEnabled, function(state)
+            Combat.Config.BodyHitEnabled = state
         end, y)
-
-        y = g:CreateSection("Triggerbot", y + 10)
-        y = g:CreateToggle("Enabled", Config.Get("Triggerbot_Enabled") or false, function(v)
-            Config.Set("Triggerbot_Enabled", v)
-        end, y)
-        y = g:CreateToggle("Team Check", Config.Get("Triggerbot_TeamCheck") ~= false, function(v)
-            Config.Set("Triggerbot_TeamCheck", v)
-        end, y)
-        y = g:CreateSlider("Chance %", 1, 100, Config.Get("Triggerbot_Chance") or 100, function(v)
-            Config.Set("Triggerbot_Chance", v)
-        end, y)
-        y = g:CreateSlider("Delay", 0, 50, Config.Get("Triggerbot_Delay") or 0, function(v)
-            Config.Set("Triggerbot_Delay", v)
+        y = g:CreateSlider("Body Hit Chance %", 0, 100, Combat.Config.BodyHitChance, function(val)
+            Combat.Config.BodyHitChance = val
         end, y)
 
-        y = g:CreateSection("Ragebot", y + 10)
-        y = g:CreateToggle("Enabled", Config.Get("Ragebot_Enabled") or false, function(v)
-            Config.Set("Ragebot_Enabled", v)
+        y = g:CreateSection("Hitbox Expander", y + 10)
+        y = g:CreateToggle("Hitbox Expander", Combat.Config.HitboxEnabled, function(state)
+            Combat.Config.HitboxEnabled = state
+            if not state then RestoreHitboxes() end
+        end, y)
+        y = g:CreateSlider("Body Hitbox Size", 5, 25, Combat.Config.HitboxSize, function(val)
+            Combat.Config.HitboxSize = val
+        end, y)
+        y = g:CreateSlider("HeadHB Size", 10, 30, Combat.Config.HeadHBSize, function(val)
+            Combat.Config.HeadHBSize = val
+        end, y)
+
+        y = g:CreateSection("Kill All", y + 10)
+        y = g:CreateToggle("Kill All", false, function(state)
+            SetKillAll(state)
+        end, y)
+
+        y = g:CreateSection("Hitsounds", y + 10)
+        y = g:CreateToggle("Enabled", false, function(state)
+            Combat.Config.HitsoundsEnabled = state
+        end, y)
+        local hitsoundNames = {"None", "Skeet.cc", "Neverlose", "Baimware", "Old Fatality", "Rust", "Bell", "TF2", "Among Us", "Fortnite Headshot", "Minecraft", "Osu", "TF2 Critical", "Bat", "Call of Duty", "Bruh", "Crowbar", "Weeb", "Steve"}
+        y = g:CreateDropdown("Sound", hitsoundNames, "Skeet.cc", function(val)
+            Combat.Config.Hitsound = val
+        end, y)
+        y = g:CreateSlider("Volume", 0, 10, 1, function(val)
+            Combat.Config.HitsoundVolume = val
         end, y)
 
         g.Content = originalContent
     end)
-
-    print("[Arsenal] Combat module initialized.")
-end
-
-function Combat.Cleanup()
-    if aimbotFOVCircle then
-        pcall(function() aimbotFOVCircle:Remove() end)
-        aimbotFOVCircle = nil
-    end
-    if silentAimFOVCircle then
-        pcall(function() silentAimFOVCircle:Remove() end)
-        silentAimFOVCircle = nil
-    end
-    if ragebotConn then
-        ragebotConn:Disconnect()
-        ragebotConn = nil
-    end
-    aimbotTarget = nil
-    silentAimTarget = nil
+    return self
 end
 
 return Combat
