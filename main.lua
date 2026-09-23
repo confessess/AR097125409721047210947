@@ -20,12 +20,27 @@ local function loadModule(name)
     end
 
     local BASE = "https://raw.githubusercontent.com/confessess/AR097125409721047210947/main/"
+    local source = game:HttpGet(BASE .. name .. ".lua")
+    if type(source) ~= "string" or source == "" then
+        error("Failed to fetch remote module " .. name .. ": empty or invalid source")
+    end
+
+    local compiler = loadstring or load
+    if type(compiler) ~= "function" then
+        error("Failed to load module " .. name .. ": no supported compiler available")
+    end
+
+    local chunk = compiler(source)
+    if type(chunk) ~= "function" then
+        error("Failed to compile remote module " .. name .. ": compiler returned nil")
+    end
+
     local ok, result = pcall(function()
-        return loadstring(game:HttpGet(BASE .. name .. ".lua"))()
+        return chunk()
     end)
 
     if not ok then
-        error("Failed to load module " .. name .. ": " .. tostring(result))
+        error("Failed to execute remote module " .. name .. ": " .. tostring(result))
     end
 
     debugLog("BOOT", "Loaded remote module:", name)
