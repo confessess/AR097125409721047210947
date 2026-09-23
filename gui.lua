@@ -44,6 +44,16 @@ local MouseUnlockConnection = nil
 local MouseUnlockHeartbeat = nil
 local CameraModeHook = nil
 
+local function clamp(value, minValue, maxValue)
+    if value < minValue then
+        return minValue
+    end
+    if value > maxValue then
+        return maxValue
+    end
+    return value
+end
+
 local function ForceUnlockMouse()
     UserInputService.MouseBehavior = Enum.MouseBehavior.Default
     UserInputService.MouseIconEnabled = true
@@ -162,9 +172,9 @@ function Gui:Init()
     waveGrad.Rotation = WAVE_ROTATION
     waveGrad.Transparency = NumberSequence.new({
         NumberSequenceKeypoint.new(0.00, 1),
-        NumberSequenceKeypoint.new(math.clamp(0.50 - WAVE_BAND_WIDTH, 0, 1), 1),
+        NumberSequenceKeypoint.new(clamp(0.50 - WAVE_BAND_WIDTH, 0, 1), 1),
         NumberSequenceKeypoint.new(0.50, WAVE_PEAK_TRANS),
-        NumberSequenceKeypoint.new(math.clamp(0.50 + WAVE_BAND_WIDTH, 0, 1), 1),
+        NumberSequenceKeypoint.new(clamp(0.50 + WAVE_BAND_WIDTH, 0, 1), 1),
         NumberSequenceKeypoint.new(1.00, 1)
     })
     waveGrad.Parent = sheen
@@ -793,7 +803,7 @@ function Gui:CreateSlider(label, min, max, default, callback, y)
     local Dragging = false
 
     local function update(input)
-        local pos = math.clamp((input.Position.X - Track.AbsolutePosition.X) / Track.AbsoluteSize.X, 0, 1)
+        local pos = clamp((input.Position.X - Track.AbsolutePosition.X) / Track.AbsoluteSize.X, 0, 1)
         local value = math.floor(min + (pos * range))
         Fill.Size = UDim2.new(pos, 0, 1, 0)
         Knob.Position = UDim2.new(pos, -7, 0.5, -7)

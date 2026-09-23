@@ -298,14 +298,14 @@ local function ApplyGunChams()
     local trans = GunMods.Config.ChamsTransparency
 
     for _, child in ipairs(arms:GetChildren()) do
-        if child.Name == "CSSArms" then continue end
-
-        if child:IsA("BasePart") and child.Transparency ~= 1 then
-            SnapshotGunPart(child)
-            child.Color = col
-            child.Reflectance = refl
-            child.Transparency = trans
-            child.Material = mat
+        if child.Name ~= "CSSArms" then
+            if child:IsA("BasePart") and child.Transparency ~= 1 then
+                SnapshotGunPart(child)
+                child.Color = col
+                child.Reflectance = refl
+                child.Transparency = trans
+                child.Material = mat
+            end
         end
         if child:IsA("MeshPart") then
             SnapshotGunPart(child)

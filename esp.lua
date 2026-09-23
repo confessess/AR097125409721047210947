@@ -152,33 +152,28 @@ local function UpdateESP()
     for player, esp in pairs(ESPObjects) do
         if not player or not player.Parent then
             RemoveESP(player)
-            continue
-        end
+        else
+            local character = player.Character
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 
-        local character = player.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-
-        if not character or not humanoid or not rootPart then
-            if esp then
-                esp.Box.Visible = false
-                esp.BoxOutline.Visible = false
-                esp.Name.Visible = false
-                esp.HealthBar.Visible = false
-                esp.HealthBarOutline.Visible = false
-                esp.HealthText.Visible = false
-                esp.Distance.Visible = false
-                esp.Weapon.Visible = false
-            end
-            local hl = Highlights[player]
-            if hl then
-                hl.Enabled = false
-                hl.Parent = nil
-            end
-            continue
-        end
-
-        if character and humanoid and rootPart and humanoid.Health > 0 then
+            if not character or not humanoid or not rootPart then
+                if esp then
+                    esp.Box.Visible = false
+                    esp.BoxOutline.Visible = false
+                    esp.Name.Visible = false
+                    esp.HealthBar.Visible = false
+                    esp.HealthBarOutline.Visible = false
+                    esp.HealthText.Visible = false
+                    esp.Distance.Visible = false
+                    esp.Weapon.Visible = false
+                end
+                local hl = Highlights[player]
+                if hl then
+                    hl.Enabled = false
+                    hl.Parent = nil
+                end
+            elseif character and humanoid and rootPart and humanoid.Health > 0 then
             local showESP = true
             if ESP.Config.TeamCheck and player.Team == LocalPlayer.Team then
                 showESP = false
@@ -220,9 +215,9 @@ local function UpdateESP()
                     end
 
                     if ESP.Config.Health then
-                        local healthPercent = math.clamp(humanoid.Health / math.max(1, humanoid.MaxHealth), 0, 1)
-                        local r = math.clamp(255 * (1 - healthPercent), 0, 255)
-                        local g = math.clamp(255 * healthPercent, 0, 255)
+                        local healthPercent = clamp(humanoid.Health / math.max(1, humanoid.MaxHealth), 0, 1)
+                        local r = clamp(255 * (1 - healthPercent), 0, 255)
+                        local g = clamp(255 * healthPercent, 0, 255)
                         local barHeight = math.max(2, height * healthPercent)
 
                         esp.HealthBar.Size = Vector2.new(4, barHeight)

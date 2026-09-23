@@ -37,6 +37,16 @@ Combat.Config = {
     BodyHitChance = 30,
 }
 
+local function clamp(value, minValue, maxValue)
+    if value < minValue then
+        return minValue
+    end
+    if value > maxValue then
+        return maxValue
+    end
+    return value
+end
+
 local FOV_Circle = Drawing.new("Circle")
 FOV_Circle.Color = Color3.fromRGB(255, 255, 255)
 FOV_Circle.Thickness = 1
@@ -116,18 +126,22 @@ local function GetClosestEnemy()
     local closestTarget = nil
     local mousePos = UserInputService:GetMouseLocation()
     for _, plr in ipairs(Players:GetPlayers()) do
-        if not IsValidTarget(plr) then continue end
-        local char = plr.Character
-        local targetPart = char:FindFirstChild(Combat.Config.HitPart)
-        if not targetPart then targetPart = char:FindFirstChild("Head") end
-        if not targetPart then continue end
-        if not IsVisible(targetPart) then continue end
-        local pos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-        if not onScreen then continue end
-        local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-        if dist < closestDist then
-            closestDist = dist
-            closestTarget = plr
+        if IsValidTarget(plr) then
+            local char = plr.Character
+            local targetPart = char:FindFirstChild(Combat.Config.HitPart)
+            if not targetPart then
+                targetPart = char:FindFirstChild("Head")
+            end
+            if targetPart and IsVisible(targetPart) then
+                local pos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                if onScreen then
+                    local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+                    if dist < closestDist then
+                        closestDist = dist
+                        closestTarget = plr
+                    end
+                end
+            end
         end
     end
     return closestTarget
@@ -238,32 +252,31 @@ local function StartSilentAim()
 
         for _, plr in ipairs(Players:GetPlayers()) do
             checked = checked + 1
-            if not IsValidTarget(plr) then continue end
-            valid = valid + 1
-            local char = plr.Character
+            if IsValidTarget(plr) then
+                valid = valid + 1
+                local char = plr.Character
 
-            -- Get hit part (respects random mode)
-            local targetPart = GetHitPart(char)
-            if not targetPart then continue end
-            hasPart = hasPart + 1
+                local targetPart = GetHitPart(char)
+                if targetPart then
+                    hasPart = hasPart + 1
 
-            -- NO WALL CHECK - removed for debugging
+                    local screenPos, visible = Camera:WorldToViewportPoint(targetPart.Position)
+                    if visible then
+                        onScreen = onScreen + 1
 
-            local screenPos, visible = Camera:WorldToViewportPoint(targetPart.Position)
-            if not visible then continue end
-            onScreen = onScreen + 1
-
-            -- Distance from MOUSE (not screen center)
-            local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-            if dist < closestDist then
-                closestDist = dist
-                closest = {
-                    player = plr,
-                    part = targetPart,
-                    character = char,
-                    distance = dist,
-                    screenPos = screenPos
-                }
+                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                        if dist < closestDist then
+                            closestDist = dist
+                            closest = {
+                                player = plr,
+                                part = targetPart,
+                                character = char,
+                                distance = dist,
+                                screenPos = screenPos
+                            }
+                        end
+                    end
+                end
             end
         end
 
@@ -280,7 +293,7 @@ local function StartSilentAim()
     local OriginalData = {}
 
     local function GetDynamicHitboxSize(partName, fovRadius)
-        local base = math.clamp(fovRadius / 12, 2.5, 18)
+        local base = clamp(fovRadius / 12, 2.5, 18)
         local partMap = {
             Head = {1.8, 1.8, 1.8},
             UpperTorso = {1.4, 1.4, 1.4},
@@ -596,42 +609,32 @@ local function StartMagicBullet()
         local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 
         for _, plr in ipairs(Players:GetPlayers()) do
-            if plr == LocalPlayer then continue end
-            if not plr.Character then continue end
-
-            -- Basic validity check (alive, spawned)
-            local char = plr.Character
-            local humanoid = char:FindFirstChildOfClass("Humanoid")
-            if not humanoid or humanoid.Health <= 0 then continue end
-            local spawned = char:FindFirstChild("Spawned")
-            if spawned and not spawned.Value then continue end
-
-            -- Team check
-            if mbConfig.TeamCheck then
-                local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
-                local ffa = wkspc and wkspc:FindFirstChild("FFA")
-                if not (ffa and ffa.Value) then
-                    if plr.Team == LocalPlayer.Team then continue end
+            if plr ~= LocalPlayer and plr.Character then
+                local char = plr.Character
+                local humanoid = char:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.Health > 0 then
+                    local spawned = char:FindFirstChild("Spawned")
+                    if not (spawned and not spawned.Value) then
+                        if not mbConfig.TeamCheck or not (plr.Team == LocalPlayer.Team) then
+                            local head = char:FindFirstChild("Head") or char:FindFirstChild("HeadHB")
+                            if head then
+                                local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                                if onScreen then
+                                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
+                                    if dist < closestDist then
+                                        closestDist = dist
+                                        closest = {
+                                            player = plr,
+                                            part = head,
+                                            character = char,
+                                            distance = dist
+                                        }
+                                    end
+                                end
+                            end
+                        end
+                    end
                 end
-            end
-
-            -- Get head
-            local head = char:FindFirstChild("Head") or char:FindFirstChild("HeadHB")
-            if not head then continue end
-
-            -- Distance from crosshair (screen center)
-            local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
-            if not onScreen then continue end
-
-            local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
-            if dist < closestDist then
-                closestDist = dist
-                closest = {
-                    player = plr,
-                    part = head,
-                    character = char,
-                    distance = dist
-                }
             end
         end
         return closest
@@ -832,22 +835,23 @@ local OriginalData = {}
 local function ExpandHitboxes()
     if not Combat.Config.HitboxEnabled then return end
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LocalPlayer then continue end
-        if Combat.Config.TeamCheck and plr.Team == LocalPlayer.Team then continue end
-        local char = plr.Character
-        if not char then continue end
-        local partsToExpand = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart"}
-        for _, partName in ipairs(partsToExpand) do
-            local part = char:FindFirstChild(partName)
-            if part and part:IsA("BasePart") then
-                if not OriginalData[part] then
-                    OriginalData[part] = {Size = part.Size, Transparency = part.Transparency}
+        if plr ~= LocalPlayer and (not Combat.Config.TeamCheck or plr.Team ~= LocalPlayer.Team) then
+            local char = plr.Character
+            if char then
+                local partsToExpand = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart"}
+                for _, partName in ipairs(partsToExpand) do
+                    local part = char:FindFirstChild(partName)
+                    if part and part:IsA("BasePart") then
+                        if not OriginalData[part] then
+                            OriginalData[part] = {Size = part.Size, Transparency = part.Transparency}
+                        end
+                        local targetSize = (partName == "HeadHB") and
+                            Vector3.new(Combat.Config.HeadHBSize, Combat.Config.HeadHBSize, Combat.Config.HeadHBSize) or
+                            Vector3.new(Combat.Config.HitboxSize, Combat.Config.HitboxSize, Combat.Config.HitboxSize)
+                        part.Size = targetSize
+                        part.Transparency = 1
+                    end
                 end
-                local targetSize = (partName == "HeadHB") and
-                    Vector3.new(Combat.Config.HeadHBSize, Combat.Config.HeadHBSize, Combat.Config.HeadHBSize) or
-                    Vector3.new(Combat.Config.HitboxSize, Combat.Config.HitboxSize, Combat.Config.HitboxSize)
-                part.Size = targetSize
-                part.Transparency = 1
             end
         end
     end
