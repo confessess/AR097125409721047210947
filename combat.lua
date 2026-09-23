@@ -147,9 +147,30 @@ local function StartSilentAim()
 
     print("[ENI] Found Raycast function, hooking...")
 
-    local actor = getactors and getactors()[1]
+    -- Get or create actor
+    local actor = nil
+    if getactors then
+        local actors = getactors()
+        if #actors > 0 then
+            actor = actors[1]
+        end
+    end
+
+    -- If no actor exists, create one
+    if not actor and Instance then
+        local success, newActor = pcall(function()
+            local a = Instance.new("Actor")
+            a.Name = "SilentAimActor"
+            a.Parent = Workspace
+            return a
+        end)
+        if success then
+            actor = newActor
+        end
+    end
+
     if not actor then
-        warn("[ENI] No actor found for silent aim")
+        warn("[ENI] Could not get or create actor for silent aim")
         SilentAimRunning = false
         return
     end
