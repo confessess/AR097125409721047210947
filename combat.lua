@@ -19,7 +19,6 @@ Combat.Config = {
     SilentAimEnabled = false,
     SilentAimFOV = 150,
     SilentAimHitPart = "Head",
-    SilentAimPrediction = false,
     HitboxEnabled = false,
     TeamCheck = true,
     WallCheck = false,
@@ -264,10 +263,24 @@ local function StartSilentAim()
     -- Use EXACT SAME method as working HBE
     local OriginalData = {}
 
+    local expandCount = 0
     local function ExpandHitboxToFOV(targetData)
-        if not targetData or not targetData.part then return end
+        if not targetData or not targetData.part then 
+            print("[ENI EXPAND] No target data or part")
+            return 
+        end
         local char = targetData.character
-        if not char then return end
+        if not char then 
+            print("[ENI EXPAND] No character")
+            return 
+        end
+
+        expandCount = expandCount + 1
+        print("[ENI EXPAND] === Expanding hitbox #" .. expandCount .. " ===")
+        print("[ENI EXPAND] Target: " .. targetData.player.Name)
+        print("[ENI EXPAND] Part: " .. targetData.part.Name)
+        print("[ENI EXPAND] Part position: " .. tostring(targetData.part.Position))
+        print("[ENI EXPAND] Part size BEFORE: " .. tostring(targetData.part.Size))
 
         -- Calculate expansion size based on distance (FOV-based)
         local distance = (targetData.part.Position - Camera.CFrame.Position).Magnitude
@@ -275,6 +288,7 @@ local function StartSilentAim()
 
         -- Scale size based on distance - closer = bigger
         local baseSize = math.clamp(distance * (fov / 100), 5, 25)
+        print("[ENI EXPAND] Distance: " .. distance .. " | FOV: " .. fov .. " | Base size: " .. baseSize)
 
         -- Use SAME parts as working HBE
         local partsToExpand = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart"}
@@ -306,6 +320,8 @@ local function StartSilentAim()
         end
 
         currentHitPart = targetData.part
+        print("[ENI EXPAND] Part size AFTER: " .. tostring(targetData.part.Size))
+        print("[ENI EXPAND] Expansion complete!")
     end
 
     local function RestoreHitbox(char)
@@ -403,12 +419,20 @@ local function StartSilentAim()
 
         -- Expand new target if needed
         if shouldExpand and newTarget then
+            print("[ENI TARGET] New target: " .. newTarget.player.Name)
             currentTarget = newTarget
             currentTargetChar = newTarget.character
             ExpandHitboxToFOV(newTarget)
+        end
 
-            if randomHitPartEnabled then
-                print("[ENI] Target: " .. newTarget.player.Name .. " | Hit Part: " .. newTarget.part.Name)
+        -- Debug current target status every 2 seconds
+        if frameCount % 120 == 0 then
+            if currentTarget then
+                print("[ENI STATUS] Current target: " .. currentTarget.player.Name)
+                print("[ENI STATUS] Current part: " .. tostring(currentTarget.part))
+                print("[ENI STATUS] Part size: " .. tostring(currentTarget.part and currentTarget.part.Size))
+            else
+                print("[ENI STATUS] No current target")
             end
         end
 
@@ -699,7 +723,6 @@ RunService.RenderStepped:Connect(function()
         BodyHitEnabled = Combat.Config.BodyHitEnabled,
         BodyHitChance = Combat.Config.BodyHitChance,
         HitPart = Combat.Config.SilentAimHitPart,
-        Prediction = Combat.Config.SilentAimPrediction,
     }
 
     local shouldAim = false
@@ -1083,8 +1106,6 @@ function Combat:Init(Gui)
         y = g:CreateToggle("Team Check", true, function(state)
             Combat.Config.TeamCheck = state
         end, y)
-        y = g:CreateToggle("Prediction", Combat.Config.SilentAimPrediction, function(state)
-            Combat.Config.SilentAimPrediction = state
         end, y)
         y = g:CreateToggle("Body Hit Redirection", Combat.Config.BodyHitEnabled, function(state)
             Combat.Config.BodyHitEnabled = state
