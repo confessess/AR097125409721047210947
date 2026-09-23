@@ -23,8 +23,6 @@ Combat.Config = {
     TeamCheck = true,
     WallCheck = false,
     FOV = 25,
-    AimbotFOVVisible = true,
-    SilentAimFOVVisible = true,
     HitPart = "Head",
     HitboxSize = 13,
     HeadHBSize = 20,
@@ -36,16 +34,6 @@ Combat.Config = {
     BodyHitEnabled = false,
     BodyHitChance = 30,
 }
-
-local function clamp(value, minValue, maxValue)
-    if value < minValue then
-        return minValue
-    end
-    if value > maxValue then
-        return maxValue
-    end
-    return value
-end
 
 local FOV_Circle = Drawing.new("Circle")
 FOV_Circle.Color = Color3.fromRGB(255, 255, 255)
@@ -65,19 +53,21 @@ SilentFOV_Circle.Transparency = 0.5
 SilentFOV_Circle.Radius = 150
 SilentFOV_Circle.Visible = false
 
+local showFOVCircle = true
+
 local function UpdateFOVCircle()
     if not FOV_Circle or not SilentFOV_Circle then return end
 
     local mousePos = UserInputService:GetMouseLocation()
     FOV_Circle.Position = Vector2.new(mousePos.X, mousePos.Y)
     FOV_Circle.Radius = Combat.Config.FOV
-    FOV_Circle.Visible = Combat.Config.AimbotEnabled and (Combat.Config.AimbotFOVVisible ~= false)
+    FOV_Circle.Visible = Combat.Config.AimbotEnabled and showFOVCircle
 
     if Camera and Camera.ViewportSize then
         SilentFOV_Circle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     end
     SilentFOV_Circle.Radius = Combat.Config.SilentAimFOV
-    SilentFOV_Circle.Visible = Combat.Config.SilentAimEnabled and (Combat.Config.SilentAimFOVVisible ~= false)
+    SilentFOV_Circle.Visible = Combat.Config.SilentAimEnabled and showFOVCircle
 end
 
 local function IsVisible(targetPart)
@@ -293,7 +283,7 @@ local function StartSilentAim()
     local OriginalData = {}
 
     local function GetDynamicHitboxSize(partName, fovRadius)
-        local base = clamp(fovRadius / 12, 2.5, 18)
+        local base = math.clamp(fovRadius / 12, 2.5, 18)
         local partMap = {
             Head = {1.8, 1.8, 1.8},
             UpperTorso = {1.4, 1.4, 1.4},
@@ -544,17 +534,10 @@ local function StartSilentAim()
         end
     end)
 
-    -- Expose FOV circle toggles separately
+    -- Expose FOV circle toggle
     getgenv().__ToggleFOVCircle = function(enabled)
-        Combat.Config.AimbotFOVVisible = enabled
-        UpdateFOVCircle()
-        print("[ENI] Aimbot FOV Circle: " .. (enabled and "ON" or "OFF"))
-    end
-
-    getgenv().__ToggleSilentAimFOVCircle = function(enabled)
-        Combat.Config.SilentAimFOVVisible = enabled
-        UpdateFOVCircle()
-        print("[ENI] Silent Aim FOV Circle: " .. (enabled and "ON" or "OFF"))
+        showFOVCircle = enabled
+        print("[ENI] FOV Circle: " .. (enabled and "ON" or "OFF"))
     end
 
     -- Expose random hit part toggle
@@ -1151,12 +1134,8 @@ function Combat:Init(Gui)
             y = g:CreateSlider("FOV Radius", 10, 200, Combat.Config.FOV, function(val)
                 Combat.Config.FOV = val
             end, y)
-            y = g:CreateToggle("Show Aimbot FOV", Combat.Config.AimbotFOVVisible, function(state)
-                Combat.Config.AimbotFOVVisible = state
-                if getgenv().__ToggleFOVCircle then
-                    getgenv().__ToggleFOVCircle(state)
-                end
-                UpdateFOVCircle()
+            y = g:CreateSlider("FOV Radius", 10, 200, Combat.Config.FOV, function(val)
+                Combat.Config.FOV = val
             end, y)
 
             y = g:CreateSection("Silent Aim", y + 10)
@@ -1182,10 +1161,10 @@ function Combat:Init(Gui)
                     getgenv().__ToggleRandomHitPart(state)
                 end
             end, y)
-            y = g:CreateToggle("Show Silent FOV", Combat.Config.SilentAimFOVVisible, function(state)
-                Combat.Config.SilentAimFOVVisible = state
-                if getgenv().__ToggleSilentAimFOVCircle then
-                    getgenv().__ToggleSilentAimFOVCircle(state)
+            y = g:CreateToggle("Show FOV Circle", showFOVCircle, function(state)
+                showFOVCircle = state
+                if getgenv().__ToggleFOVCircle then
+                    getgenv().__ToggleFOVCircle(state)
                 end
                 UpdateFOVCircle()
             end, y)

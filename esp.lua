@@ -215,9 +215,9 @@ local function UpdateESP()
                     end
 
                     if ESP.Config.Health then
-                        local healthPercent = clamp(humanoid.Health / math.max(1, humanoid.MaxHealth), 0, 1)
-                        local r = clamp(255 * (1 - healthPercent), 0, 255)
-                        local g = clamp(255 * healthPercent, 0, 255)
+                        local healthPercent = math.clamp(humanoid.Health / math.max(1, humanoid.MaxHealth), 0, 1)
+                        local r = math.clamp(255 * (1 - healthPercent), 0, 255)
+                        local g = math.clamp(255 * healthPercent, 0, 255)
                         local barHeight = math.max(2, height * healthPercent)
 
                         esp.HealthBar.Size = Vector2.new(4, barHeight)

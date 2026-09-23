@@ -1,34 +1,37 @@
 local function loadModule(name)
+    local candidates = {}
+    if script then
+        table.insert(candidates, script.Parent and script.Parent:FindFirstChild(name))
+        table.insert(candidates, script.Parent and script.Parent.Parent and script.Parent.Parent:FindFirstChild(name))
+    end
+
+    local rep = game:GetService("ReplicatedStorage")
+    local repoFolder = rep and rep:FindFirstChild("LightHub")
+    if repoFolder then
+        table.insert(candidates, repoFolder:FindFirstChild(name))
+    end
+
+    for _, candidate in ipairs(candidates) do
+        if candidate and candidate:IsA("ModuleScript") then
+            return require(candidate)
+        end
+    end
+
     local BASE = "https://raw.githubusercontent.com/confessess/AR097125409721047210947/main/"
-    local url = BASE .. name .. ".lua"
-    print("[BOOT] Loading module:", name, "from:", url)
-
-    local ok, source = pcall(function()
-        return game:HttpGet(url)
+    local ok, result = pcall(function()
+        local source = game:HttpGet(BASE .. name .. ".lua")
+        local compiled = loadstring(source)
+        if not compiled then
+            error("Remote source for " .. name .. " was empty or invalid")
+        end
+        return compiled()
     end)
-    if not ok or type(source) ~= "string" then
-        error("Failed to fetch module " .. name .. " from GitHub: " .. tostring(source))
-    end
-    if source:match("^%s*$") then
-        error("Remote source for " .. name .. " was empty")
-    end
-    print("[BOOT] Got source for:", name, "length:", #source)
 
-    local chunk, compileError = loadstring(source, name)
-    if not chunk then
-        error("Remote source for " .. name .. " was invalid: " .. tostring(compileError))
+    if not ok then
+        error("Failed to load module " .. name .. ": " .. tostring(result))
     end
 
-    local execOk, module = pcall(chunk)
-    if not execOk then
-        error("Failed to execute module " .. name .. ": " .. tostring(module))
-    end
-    if type(module) ~= "table" then
-        error("Module " .. name .. " did not return a table; got " .. type(module))
-    end
-
-    print("[BOOT] Module loaded:", name, "type:", type(module))
-    return module
+    return result
 end
 
 local GuiModule = loadModule("gui")
