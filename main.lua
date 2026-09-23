@@ -1,8 +1,25 @@
+local function debugLog(prefix, ...)
+    local args = { ... }
+    local text = ""
+    for i, v in ipairs(args) do
+        if i > 1 then text = text .. " " end
+        text = text .. tostring(v)
+    end
+    print("[" .. prefix .. "] " .. text)
+end
+
 local function loadModule(name)
+    debugLog("BOOT", "Loading module:", name)
+
     local candidates = {}
-    if script then
-        table.insert(candidates, script.Parent and script.Parent:FindFirstChild(name))
-        table.insert(candidates, script.Parent and script.Parent.Parent and script.Parent.Parent:FindFirstChild(name))
+    if type(script) == "Instance" then
+        local scriptParent = script.Parent
+        if scriptParent then
+            table.insert(candidates, scriptParent:FindFirstChild(name))
+            if scriptParent.Parent then
+                table.insert(candidates, scriptParent.Parent:FindFirstChild(name))
+            end
+        end
     end
 
     local rep = game:GetService("ReplicatedStorage")
@@ -13,15 +30,28 @@ local function loadModule(name)
 
     for _, candidate in ipairs(candidates) do
         if candidate and candidate:IsA("ModuleScript") then
+            debugLog("BOOT", "Using local module:", name, "@", candidate:GetFullName())
             return require(candidate)
         end
     end
 
     local BASE = "https://raw.githubusercontent.com/confessess/AR097125409721047210947/main/"
+    local source, fetchErr = pcall(function()
+        return game:HttpGet(BASE .. name .. ".lua")
+    end)
+
+    if not source then
+        error("Failed to fetch remote module " .. name .. ": " .. tostring(fetchErr))
+    end
+
+    local compileFn = loadstring or load
+    if not compileFn then
+        error("No compile function available for module " .. name .. ". loadstring and load are both nil.")
+    end
+
     local ok, result = pcall(function()
-        local source = game:HttpGet(BASE .. name .. ".lua")
-        local compiled = loadstring(source)
-        if not compiled then
+        local compiled = compileFn(source)
+        if type(compiled) ~= "function" then
             error("Remote source for " .. name .. " was empty or invalid")
         end
         return compiled()
@@ -31,9 +61,11 @@ local function loadModule(name)
         error("Failed to load module " .. name .. ": " .. tostring(result))
     end
 
+    debugLog("BOOT", "Loaded remote module:", name)
     return result
 end
 
+print("[BOOT] Starting bootstrap")
 local GuiModule = loadModule("gui")
 local CombatModule = loadModule("combat")
 local ESPModule = loadModule("esp")
@@ -41,6 +73,15 @@ local GunModsModule = loadModule("gunmods")
 local MovementModule = loadModule("movement")
 local WorldModule = loadModule("world")
 local SkinChangerModule = loadModule("skinchanger")
+
+print("[BOOT] Module states:", type(GuiModule), type(CombatModule), type(ESPModule), type(GunModsModule), type(MovementModule), type(WorldModule), type(SkinChangerModule))
+if not GuiModule then error("GuiModule is nil after loadModule('gui')") end
+if not CombatModule then error("CombatModule is nil after loadModule('combat')") end
+if not ESPModule then error("ESPModule is nil after loadModule('esp')") end
+if not GunModsModule then error("GunModsModule is nil after loadModule('gunmods')") end
+if not MovementModule then error("MovementModule is nil after loadModule('movement')") end
+if not WorldModule then error("WorldModule is nil after loadModule('world')") end
+if not SkinChangerModule then error("SkinChangerModule is nil after loadModule('skinchanger')") end
 
 local Gui = GuiModule:Init()
 print("[BOOT] GUI created")
