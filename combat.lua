@@ -593,13 +593,21 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 end)
 
 function Combat:Init(Gui)
+    print("[COMBAT] Init called")
+    print("[COMBAT] Gui object exists:", Gui ~= nil)
+    print("[COMBAT] Gui.SetTabRebuild type:", type(Gui and Gui.SetTabRebuild))
+    print("[COMBAT] Combat tab exists before registration:", Gui and Gui:GetTab("Combat") ~= nil)
     self.Gui = Gui
-    Gui:SetTabRebuild("Combat", function(g)
-        local scroll = g:CreateScrollContent()
-        local originalContent = g.Content
-        g.Content = scroll
 
-        local y = g:CreateSection("Aimbot", 0)
+    if Gui and Gui.SetTabRebuild then
+        print("[COMBAT] Registering rebuild callback for Combat")
+        Gui:SetTabRebuild("Combat", function(g)
+            print("[COMBAT] Rebuild callback started")
+            local scroll = g:CreateScrollContent()
+            local originalContent = g.Content
+            g.Content = scroll
+
+            local y = g:CreateSection("Aimbot", 0)
         y = g:CreateToggle("Aimbot", Combat.Config.AimbotEnabled, function(state)
             Combat.Config.AimbotEnabled = state
             UpdateFOVCircle()
@@ -661,8 +669,13 @@ function Combat:Init(Gui)
             Combat.Config.HitsoundVolume = val
         end, y)
 
-        g.Content = originalContent
-    end)
+            g.Content = originalContent
+            print("[COMBAT] Rebuild callback completed")
+        end)
+    else
+        warn("[COMBAT] Gui missing SetTabRebuild; cannot register Combat tab")
+    end
+
     return self
 end
 
