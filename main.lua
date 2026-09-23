@@ -1,26 +1,34 @@
 local function loadModule(name)
     local BASE = "https://raw.githubusercontent.com/confessess/AR097125409721047210947/main/"
     local url = BASE .. name .. ".lua"
+    print("[BOOT] Loading module:", name, "from:", url)
 
-    local ok, result = pcall(function()
-        local source = game:HttpGet(url)
-        if type(source) ~= "string" or source:match("^%s*$") then
-            error("Remote source for " .. name .. " was empty")
-        end
-
-        local compiled, compileError = loadstring(source)
-        if not compiled then
-            error("Remote source for " .. name .. " was invalid: " .. tostring(compileError))
-        end
-
-        return compiled()
+    local ok, source = pcall(function()
+        return game:HttpGet(url)
     end)
+    if not ok or type(source) ~= "string" then
+        error("Failed to fetch module " .. name .. " from GitHub: " .. tostring(source))
+    end
+    if source:match("^%s*$") then
+        error("Remote source for " .. name .. " was empty")
+    end
+    print("[BOOT] Got source for:", name, "length:", #source)
 
-    if not ok then
-        error("Failed to load module " .. name .. " from GitHub: " .. tostring(result))
+    local chunk, compileError = loadstring(source, name)
+    if not chunk then
+        error("Remote source for " .. name .. " was invalid: " .. tostring(compileError))
     end
 
-    return result
+    local execOk, module = pcall(chunk)
+    if not execOk then
+        error("Failed to execute module " .. name .. ": " .. tostring(module))
+    end
+    if type(module) ~= "table" then
+        error("Module " .. name .. " did not return a table; got " .. type(module))
+    end
+
+    print("[BOOT] Module loaded:", name, "type:", type(module))
+    return module
 end
 
 local GuiModule = loadModule("gui")
