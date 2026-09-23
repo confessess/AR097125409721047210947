@@ -273,6 +273,45 @@ local function StartSilentAim()
         end
     end)
 
+    -- Hook getCollisionPoint to redirect bullets
+    local getCollisionPointFunc = nil
+    for _, v in pairs(getgc()) do
+        if type(v) == "function" and islclosure(v) then
+            local name = debug.info(v, "n")
+            if name == "getCollisionPoint" then
+                getCollisionPointFunc = v
+                break
+            end
+        end
+    end
+
+    if getCollisionPointFunc then
+        print("[ENI] Found getCollisionPoint, hooking...")
+
+        local old
+        old = hookfunction(getCollisionPointFunc, function(arg1, arg2, ...)
+            -- Debug when called with target
+            if target and config.Enabled ~= false then
+                print("[ENI HOOK] getCollisionPoint called with target!")
+                print("[ENI HOOK] Target: " .. tostring(target))
+                print("[ENI HOOK] Arg1: " .. typeof(arg1))
+                print("[ENI HOOK] Arg2: " .. typeof(arg2))
+            end
+
+            -- If we have a target, return target hit instead
+            if target and target.Position and config.Enabled ~= false then
+                print("[ENI HOOK] Redirecting to target!")
+                return target, target.Position
+            end
+
+            return old(arg1, arg2, ...)
+        end)
+
+        print("[ENI] getCollisionPoint hooked successfully!")
+    else
+        warn("[ENI] getCollisionPoint not found!")
+    end
+
     print("[ENI] Silent aim initialization complete - WAITING FOR TARGET...")
 end
 
