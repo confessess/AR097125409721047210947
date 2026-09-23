@@ -59,6 +59,12 @@ MovementModule:Init(Gui)
 WorldModule:Init(Gui)
 SkinChangerModule:Init(Gui)
 
+if Gui.CurrentTab then
+    Gui:SwitchTab(Gui.CurrentTab)
+else
+    Gui:SwitchTab("Combat")
+end
+
 --// CONFIG SYSTEM — automatic save/load
 local CONFIG_PATH = "blackout_config.json"
 
