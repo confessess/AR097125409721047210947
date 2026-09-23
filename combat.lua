@@ -23,6 +23,8 @@ Combat.Config = {
     TeamCheck = true,
     WallCheck = false,
     FOV = 25,
+    AimbotFOVVisible = true,
+    SilentAimFOVVisible = true,
     HitPart = "Head",
     HitboxSize = 13,
     HeadHBSize = 20,
@@ -53,21 +55,19 @@ SilentFOV_Circle.Transparency = 0.5
 SilentFOV_Circle.Radius = 150
 SilentFOV_Circle.Visible = false
 
-local showFOVCircle = true
-
 local function UpdateFOVCircle()
     if not FOV_Circle or not SilentFOV_Circle then return end
 
     local mousePos = UserInputService:GetMouseLocation()
     FOV_Circle.Position = Vector2.new(mousePos.X, mousePos.Y)
     FOV_Circle.Radius = Combat.Config.FOV
-    FOV_Circle.Visible = Combat.Config.AimbotEnabled and showFOVCircle
+    FOV_Circle.Visible = Combat.Config.AimbotEnabled and (Combat.Config.AimbotFOVVisible ~= false)
 
     if Camera and Camera.ViewportSize then
         SilentFOV_Circle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     end
     SilentFOV_Circle.Radius = Combat.Config.SilentAimFOV
-    SilentFOV_Circle.Visible = Combat.Config.SilentAimEnabled and showFOVCircle
+    SilentFOV_Circle.Visible = Combat.Config.SilentAimEnabled and (Combat.Config.SilentAimFOVVisible ~= false)
 end
 
 local function IsVisible(targetPart)
@@ -116,22 +116,18 @@ local function GetClosestEnemy()
     local closestTarget = nil
     local mousePos = UserInputService:GetMouseLocation()
     for _, plr in ipairs(Players:GetPlayers()) do
-        if IsValidTarget(plr) then
-            local char = plr.Character
-            local targetPart = char:FindFirstChild(Combat.Config.HitPart)
-            if not targetPart then
-                targetPart = char:FindFirstChild("Head")
-            end
-            if targetPart and IsVisible(targetPart) then
-                local pos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                if onScreen then
-                    local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
-                    if dist < closestDist then
-                        closestDist = dist
-                        closestTarget = plr
-                    end
-                end
-            end
+        if not IsValidTarget(plr) then continue end
+        local char = plr.Character
+        local targetPart = char:FindFirstChild(Combat.Config.HitPart)
+        if not targetPart then targetPart = char:FindFirstChild("Head") end
+        if not targetPart then continue end
+        if not IsVisible(targetPart) then continue end
+        local pos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+        if not onScreen then continue end
+        local dist = (Vector2.new(pos.X, pos.Y) - mousePos).Magnitude
+        if dist < closestDist then
+            closestDist = dist
+            closestTarget = plr
         end
     end
     return closestTarget
@@ -242,31 +238,32 @@ local function StartSilentAim()
 
         for _, plr in ipairs(Players:GetPlayers()) do
             checked = checked + 1
-            if IsValidTarget(plr) then
-                valid = valid + 1
-                local char = plr.Character
+            if not IsValidTarget(plr) then continue end
+            valid = valid + 1
+            local char = plr.Character
 
-                local targetPart = GetHitPart(char)
-                if targetPart then
-                    hasPart = hasPart + 1
+            -- Get hit part (respects random mode)
+            local targetPart = GetHitPart(char)
+            if not targetPart then continue end
+            hasPart = hasPart + 1
 
-                    local screenPos, visible = Camera:WorldToViewportPoint(targetPart.Position)
-                    if visible then
-                        onScreen = onScreen + 1
+            -- NO WALL CHECK - removed for debugging
 
-                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                        if dist < closestDist then
-                            closestDist = dist
-                            closest = {
-                                player = plr,
-                                part = targetPart,
-                                character = char,
-                                distance = dist,
-                                screenPos = screenPos
-                            }
-                        end
-                    end
-                end
+            local screenPos, visible = Camera:WorldToViewportPoint(targetPart.Position)
+            if not visible then continue end
+            onScreen = onScreen + 1
+
+            -- Distance from MOUSE (not screen center)
+            local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+            if dist < closestDist then
+                closestDist = dist
+                closest = {
+                    player = plr,
+                    part = targetPart,
+                    character = char,
+                    distance = dist,
+                    screenPos = screenPos
+                }
             end
         end
 
@@ -280,105 +277,72 @@ local function StartSilentAim()
 
 -- RestoreHitbox now included in ExpandHitboxToFOV section above
 
+    -- Use EXACT SAME method as working HBE
     local OriginalData = {}
-
-    local function GetDynamicHitboxSize(partName, fovRadius)
-        local base = math.clamp(fovRadius / 12, 2.5, 18)
-        local partMap = {
-            Head = {1.8, 1.8, 1.8},
-            UpperTorso = {1.4, 1.4, 1.4},
-            Torso = {1.5, 1.5, 1.5},
-            LowerTorso = {1.45, 1.45, 1.45},
-            HumanoidRootPart = {1.8, 1.8, 1.8},
-            LeftUpperLeg = {1.2, 1.2, 1.2},
-            RightUpperLeg = {1.2, 1.2, 1.2},
-            Left Arm = {1.1, 1.1, 1.1},
-            Right Arm = {1.1, 1.1, 1.1},
-            LeftLeg = {1.15, 1.15, 1.15},
-            RightLeg = {1.15, 1.15, 1.15},
-            Left Lower Leg = {1.2, 1.2, 1.2},
-            Right Lower Leg = {1.2, 1.2, 1.2},
-            HeadHB = {2.0, 2.0, 2.0},
-        }
-
-        local multiplier = partMap[partName] or {1.0, 1.0, 1.0}
-        return Vector3.new(base * multiplier[1], base * multiplier[2], base * multiplier[3])
-    end
 
     local expandCount = 0
     local function ExpandHitboxToFOV(targetData)
-        if not targetData or not targetData.part then
+        if not targetData or not targetData.part then 
             print("[ENI EXPAND] No target data or part")
-            return
+            return 
         end
-
         local char = targetData.character
-        if not char then
+        if not char then 
             print("[ENI EXPAND] No character")
-            return
-        end
-
-        local origin = Camera.CFrame.Position
-        local direction = (targetData.part.Position - origin)
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = {LocalPlayer.Character, char}
-        params.IgnoreWater = true
-        local wallCheck = Workspace:Raycast(origin, direction, params)
-        if wallCheck and wallCheck.Instance and not wallCheck.Instance:IsDescendantOf(char) then
-            print("[ENI EXPAND] Blocked by wall, skipping expansion for " .. targetData.player.Name)
-            return
+            return 
         end
 
         expandCount = expandCount + 1
-        local fov = Combat.Config.SilentAimFOV or (config and config.FOV) or 150
-        local targetPartName = targetData.part.Name
+        print("[ENI EXPAND] === Expanding hitbox #" .. expandCount .. " ===")
+        print("[ENI EXPAND] Target: " .. targetData.player.Name)
+        print("[ENI EXPAND] Part: " .. targetData.part.Name)
+        print("[ENI EXPAND] Part position: " .. tostring(targetData.part.Position))
+        print("[ENI EXPAND] Part size BEFORE: " .. tostring(targetData.part.Size))
 
-        print("[ENI EXPAND] Target: " .. targetData.player.Name .. " | Part: " .. targetPartName .. " | Silent FOV: " .. fov)
+        -- Calculate expansion size based on distance (FOV-based)
+        local distance = (targetData.part.Position - Camera.CFrame.Position).Magnitude
+        local fov = config.FOV or 150
 
-        local partsToExpand = {
-            "Head",
-            "UpperTorso",
-            "Torso",
-            "LowerTorso",
-            "HumanoidRootPart",
-            "LeftUpperLeg",
-            "RightUpperLeg",
-            "Left Arm",
-            "Right Arm",
-            "Left Leg",
-            "Right Leg",
-            targetPartName,
-        }
+        -- Scale size based on distance - closer = bigger
+        local baseSize = math.clamp(distance * (fov / 100), 5, 25)
+        print("[ENI EXPAND] Distance: " .. distance .. " | FOV: " .. fov .. " | Base size: " .. baseSize)
+
+        -- Use SAME parts as working HBE
+        local partsToExpand = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart"}
+
+        -- Also expand the selected hit part if it's different
+        local selectedPartName = targetData.part.Name
+        if not table.find(partsToExpand, selectedPartName) then
+            table.insert(partsToExpand, selectedPartName)
+        end
 
         for _, partName in ipairs(partsToExpand) do
             local part = char:FindFirstChild(partName)
             if part and part:IsA("BasePart") then
+                -- Store original using SAME method as working HBE
                 if not OriginalData[part] then
-                    OriginalData[part] = { Size = part.Size, Transparency = part.Transparency }
+                    OriginalData[part] = {Size = part.Size, Transparency = part.Transparency}
                 end
 
-                local newSize = GetDynamicHitboxSize(partName, fov)
-                part.Size = newSize
-                part.Transparency = 1
+                -- Use SAME expansion method
+                local targetSize = (partName == "HeadHB") and
+                    Vector3.new(baseSize * 1.5, baseSize * 1.5, baseSize * 1.5) or
+                    Vector3.new(baseSize, baseSize, baseSize)
+
+                part.Size = targetSize
+                part.Transparency = 1  -- SAME as working HBE (invisible)
+
                 table.insert(expandedParts, part)
             end
         end
 
         currentHitPart = targetData.part
-        print("[ENI EXPAND] Expansion complete for " .. targetData.player.Name)
+        print("[ENI EXPAND] Part size AFTER: " .. tostring(targetData.part.Size))
+        print("[ENI EXPAND] Expansion complete!")
     end
 
     local function RestoreHitbox(char)
-        if char and char.Parent then
-            for part, data in pairs(OriginalData) do
-                if part and part.Parent and part.Parent == char then
-                    part.Size = data.Size
-                    part.Transparency = data.Transparency
-                end
-            end
-        end
-
+        -- Use SAME restore method as working HBE
         for part, data in pairs(OriginalData) do
             if part and part.Parent then
                 part.Size = data.Size
@@ -470,26 +434,12 @@ local function StartSilentAim()
             expandedParts = {}
         end
 
-        -- Expand new target if needed, but only if no wall is blocking it
+        -- Expand new target if needed
         if shouldExpand and newTarget then
-            local origin = Camera.CFrame.Position
-            local direction = (newTarget.part.Position - origin)
-            local params = RaycastParams.new()
-            params.FilterType = Enum.RaycastFilterType.Exclude
-            params.FilterDescendantsInstances = {LocalPlayer.Character, newTarget.character}
-            params.IgnoreWater = true
-            local wallCheck = Workspace:Raycast(origin, direction, params)
-            if not wallCheck or wallCheck.Instance:IsDescendantOf(newTarget.character) then
-                print("[ENI TARGET] New target: " .. newTarget.player.Name)
-                currentTarget = newTarget
-                currentTargetChar = newTarget.character
-                ExpandHitboxToFOV(newTarget)
-            else
-                print("[ENI TARGET] Wall blocked target expansion: " .. newTarget.player.Name)
-                currentTarget = nil
-                currentTargetChar = nil
-                currentHitPart = nil
-            end
+            print("[ENI TARGET] New target: " .. newTarget.player.Name)
+            currentTarget = newTarget
+            currentTargetChar = newTarget.character
+            ExpandHitboxToFOV(newTarget)
         end
 
         -- Debug current target status every 2 seconds
@@ -534,10 +484,17 @@ local function StartSilentAim()
         end
     end)
 
-    -- Expose FOV circle toggle
+    -- Expose FOV circle toggles separately
     getgenv().__ToggleFOVCircle = function(enabled)
-        showFOVCircle = enabled
-        print("[ENI] FOV Circle: " .. (enabled and "ON" or "OFF"))
+        Combat.Config.AimbotFOVVisible = enabled
+        UpdateFOVCircle()
+        print("[ENI] Aimbot FOV Circle: " .. (enabled and "ON" or "OFF"))
+    end
+
+    getgenv().__ToggleSilentAimFOVCircle = function(enabled)
+        Combat.Config.SilentAimFOVVisible = enabled
+        UpdateFOVCircle()
+        print("[ENI] Silent Aim FOV Circle: " .. (enabled and "ON" or "OFF"))
     end
 
     -- Expose random hit part toggle
@@ -592,32 +549,42 @@ local function StartMagicBullet()
         local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 
         for _, plr in ipairs(Players:GetPlayers()) do
-            if plr ~= LocalPlayer and plr.Character then
-                local char = plr.Character
-                local humanoid = char:FindFirstChildOfClass("Humanoid")
-                if humanoid and humanoid.Health > 0 then
-                    local spawned = char:FindFirstChild("Spawned")
-                    if not (spawned and not spawned.Value) then
-                        if not mbConfig.TeamCheck or not (plr.Team == LocalPlayer.Team) then
-                            local head = char:FindFirstChild("Head") or char:FindFirstChild("HeadHB")
-                            if head then
-                                local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
-                                if onScreen then
-                                    local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
-                                    if dist < closestDist then
-                                        closestDist = dist
-                                        closest = {
-                                            player = plr,
-                                            part = head,
-                                            character = char,
-                                            distance = dist
-                                        }
-                                    end
-                                end
-                            end
-                        end
-                    end
+            if plr == LocalPlayer then continue end
+            if not plr.Character then continue end
+
+            -- Basic validity check (alive, spawned)
+            local char = plr.Character
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if not humanoid or humanoid.Health <= 0 then continue end
+            local spawned = char:FindFirstChild("Spawned")
+            if spawned and not spawned.Value then continue end
+
+            -- Team check
+            if mbConfig.TeamCheck then
+                local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
+                local ffa = wkspc and wkspc:FindFirstChild("FFA")
+                if not (ffa and ffa.Value) then
+                    if plr.Team == LocalPlayer.Team then continue end
                 end
+            end
+
+            -- Get head
+            local head = char:FindFirstChild("Head") or char:FindFirstChild("HeadHB")
+            if not head then continue end
+
+            -- Distance from crosshair (screen center)
+            local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+            if not onScreen then continue end
+
+            local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
+            if dist < closestDist then
+                closestDist = dist
+                closest = {
+                    player = plr,
+                    part = head,
+                    character = char,
+                    distance = dist
+                }
             end
         end
         return closest
@@ -737,14 +704,6 @@ local function StopSilentAim()
     SilentAimRunning = false
     getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
     getgenv().__SilentAimConfig.Enabled = false
-
-    if currentTargetChar then
-        RestoreHitbox(currentTargetChar)
-        currentTarget = nil
-        currentTargetChar = nil
-        currentHitPart = nil
-        expandedParts = {}
-    end
 end
 
 --// Input handlers
@@ -818,23 +777,22 @@ local OriginalData = {}
 local function ExpandHitboxes()
     if not Combat.Config.HitboxEnabled then return end
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and (not Combat.Config.TeamCheck or plr.Team ~= LocalPlayer.Team) then
-            local char = plr.Character
-            if char then
-                local partsToExpand = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart"}
-                for _, partName in ipairs(partsToExpand) do
-                    local part = char:FindFirstChild(partName)
-                    if part and part:IsA("BasePart") then
-                        if not OriginalData[part] then
-                            OriginalData[part] = {Size = part.Size, Transparency = part.Transparency}
-                        end
-                        local targetSize = (partName == "HeadHB") and
-                            Vector3.new(Combat.Config.HeadHBSize, Combat.Config.HeadHBSize, Combat.Config.HeadHBSize) or
-                            Vector3.new(Combat.Config.HitboxSize, Combat.Config.HitboxSize, Combat.Config.HitboxSize)
-                        part.Size = targetSize
-                        part.Transparency = 1
-                    end
+        if plr == LocalPlayer then continue end
+        if Combat.Config.TeamCheck and plr.Team == LocalPlayer.Team then continue end
+        local char = plr.Character
+        if not char then continue end
+        local partsToExpand = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart"}
+        for _, partName in ipairs(partsToExpand) do
+            local part = char:FindFirstChild(partName)
+            if part and part:IsA("BasePart") then
+                if not OriginalData[part] then
+                    OriginalData[part] = {Size = part.Size, Transparency = part.Transparency}
                 end
+                local targetSize = (partName == "HeadHB") and
+                    Vector3.new(Combat.Config.HeadHBSize, Combat.Config.HeadHBSize, Combat.Config.HeadHBSize) or
+                    Vector3.new(Combat.Config.HitboxSize, Combat.Config.HitboxSize, Combat.Config.HitboxSize)
+                part.Size = targetSize
+                part.Transparency = 1
             end
         end
     end
@@ -1134,8 +1092,12 @@ function Combat:Init(Gui)
             y = g:CreateSlider("FOV Radius", 10, 200, Combat.Config.FOV, function(val)
                 Combat.Config.FOV = val
             end, y)
-            y = g:CreateSlider("FOV Radius", 10, 200, Combat.Config.FOV, function(val)
-                Combat.Config.FOV = val
+            y = g:CreateToggle("Show Aimbot FOV", Combat.Config.AimbotFOVVisible, function(state)
+                Combat.Config.AimbotFOVVisible = state
+                if getgenv().__ToggleFOVCircle then
+                    getgenv().__ToggleFOVCircle(state)
+                end
+                UpdateFOVCircle()
             end, y)
 
             y = g:CreateSection("Silent Aim", y + 10)
@@ -1161,10 +1123,10 @@ function Combat:Init(Gui)
                     getgenv().__ToggleRandomHitPart(state)
                 end
             end, y)
-            y = g:CreateToggle("Show FOV Circle", showFOVCircle, function(state)
-                showFOVCircle = state
-                if getgenv().__ToggleFOVCircle then
-                    getgenv().__ToggleFOVCircle(state)
+            y = g:CreateToggle("Show Silent FOV", Combat.Config.SilentAimFOVVisible, function(state)
+                Combat.Config.SilentAimFOVVisible = state
+                if getgenv().__ToggleSilentAimFOVCircle then
+                    getgenv().__ToggleSilentAimFOVCircle(state)
                 end
                 UpdateFOVCircle()
             end, y)
