@@ -99,8 +99,10 @@ end
 
 --// ScreenGui
 function Gui:Init()
+    print("[GUI] Init starting")
     for _, child in ipairs(PlayerGui:GetChildren()) do
         if child.Name == "BlackoutGUI" then
+            print("[GUI] Destroying stale GUI:", child)
             child:Destroy()
         end
     end
@@ -529,6 +531,7 @@ function Gui:CreateTab(name, description)
 end
 
 function Gui:SwitchTab(name)
+    print("[GUI] Switching to tab:", name)
     self.CurrentTab = name
     for tabName, data in pairs(self.TabButtons) do
         if tabName == name then
@@ -556,7 +559,12 @@ function Gui:SwitchTab(name)
     end
 
     local tab = self:GetTab(name)
-    if tab and tab.Rebuild then tab.Rebuild(self) end
+    if tab then
+        print("[GUI] Tab exists:", name, "has rebuild:", tab.Rebuild ~= nil)
+        if tab.Rebuild then tab.Rebuild(self) end
+    else
+        warn("[GUI] Tab missing when switching:", name)
+    end
 end
 
 function Gui:GetTab(name)
@@ -574,12 +582,17 @@ function Gui:GetTabDescription(name)
 end
 
 function Gui:SetTabRebuild(name, callback)
+    print("[GUI] Registering rebuild for:", name)
     local tab = self:GetTab(name)
     if tab then
         tab.Rebuild = callback
+        print("[GUI] Rebuild registered for:", name)
         if self.CurrentTab == name then
+            print("[GUI] Refreshing active tab:", name)
             self:SwitchTab(name)
         end
+    else
+        warn("[GUI] Tried to register rebuild for missing tab:", name)
     end
 end
 
