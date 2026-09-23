@@ -1053,10 +1053,15 @@ end)
 
 function Combat:Init(Gui)
     print("[COMBAT] Init called")
+    print("[COMBAT] Gui object exists:", Gui ~= nil)
+    print("[COMBAT] Gui.SetTabRebuild type:", type(Gui and Gui.SetTabRebuild))
+    print("[COMBAT] Combat tab exists before registration:", Gui and Gui:GetTab("Combat") ~= nil)
     self.Gui = Gui
 
     if Gui and Gui.SetTabRebuild then
+        print("[COMBAT] Registering rebuild callback for Combat")
         Gui:SetTabRebuild("Combat", function(g)
+            print("[COMBAT] Rebuild callback started")
             local scroll = g:CreateScrollContent()
             local originalContent = g.Content
             g.Content = scroll
@@ -1142,7 +1147,10 @@ function Combat:Init(Gui)
             end, y)
 
             g.Content = originalContent
+            print("[COMBAT] Rebuild callback completed")
         end)
+    else
+        warn("[COMBAT] Gui missing SetTabRebuild; cannot register Combat tab")
     end
 
     if self.Config.SilentAimEnabled then
