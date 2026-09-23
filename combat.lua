@@ -235,9 +235,21 @@ local function StartSilentAim()
     end)
 
     -- Hook the Raycast function directly (no actor needed)
+    local callCount = 0
     local old
     old = hookfunction(RaycastFunction, function(ray, ignoreList, ...)
+        callCount = callCount + 1
+
+        -- Debug every 60 calls
+        if callCount % 60 == 0 then
+            print("[ENI DEBUG] Raycast called " .. callCount .. " times")
+            print("[ENI DEBUG] Target: " .. tostring(target))
+            print("[ENI DEBUG] Enabled: " .. tostring(config.Enabled))
+        end
+
         if target and target.Position and config.Enabled ~= false then
+            print("[ENI DEBUG] Redirecting shot to: " .. target.Name)
+
             local aimPos = target.Position
             if config.Prediction then
                 local velocity = target.AssemblyLinearVelocity or Vector3.new()

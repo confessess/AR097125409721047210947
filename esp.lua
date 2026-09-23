@@ -132,6 +132,7 @@ local function CreateESP(player)
         boxHl.Name = "ESP3DBox"
         boxHl.FillTransparency = 1
         boxHl.OutlineTransparency = 0
+        boxHl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         boxHl.Enabled = false
         BoxHighlights[player] = boxHl
     end
@@ -353,11 +354,15 @@ local function UpdateESP()
         end
         boxHl.Enabled = showBox
         if showBox then
+            boxHl.Adornee = character
+            boxHl.Parent = character
             boxHl.OutlineColor = ESP.Config.Color
             boxHl.FillTransparency = 1
             boxHl.OutlineTransparency = 0
+            boxHl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         else
             boxHl.Adornee = nil
+            boxHl.Parent = nil
             boxHl.Enabled = false
         end
     end
