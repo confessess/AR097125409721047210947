@@ -1,14 +1,30 @@
 local function loadModule(name)
-    if script and script.Parent then
-        local moduleObject = script.Parent:FindFirstChild(name)
-        if moduleObject then
-            return require(moduleObject)
+    local candidates = {}
+    if script then
+        table.insert(candidates, script.Parent and script.Parent:FindFirstChild(name))
+        table.insert(candidates, script.Parent and script.Parent.Parent and script.Parent.Parent:FindFirstChild(name))
+    end
+
+    local rep = game:GetService("ReplicatedStorage")
+    local repoFolder = rep and rep:FindFirstChild("LightHub")
+    if repoFolder then
+        table.insert(candidates, repoFolder:FindFirstChild(name))
+    end
+
+    for _, candidate in ipairs(candidates) do
+        if candidate and candidate:IsA("ModuleScript") then
+            return require(candidate)
         end
     end
 
     local BASE = "https://raw.githubusercontent.com/confessess/AR097125409721047210947/main/"
     local ok, result = pcall(function()
-        return loadstring(game:HttpGet(BASE .. name .. ".lua"))()
+        local source = game:HttpGet(BASE .. name .. ".lua")
+        local compiled = loadstring(source)
+        if not compiled then
+            error("Remote source for " .. name .. " was empty or invalid")
+        end
+        return compiled()
     end)
 
     if not ok then
