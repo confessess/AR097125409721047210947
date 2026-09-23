@@ -1,34 +1,23 @@
 local function loadModule(name)
-    local candidates = {}
-    if script then
-        table.insert(candidates, script.Parent and script.Parent:FindFirstChild(name))
-        table.insert(candidates, script.Parent and script.Parent.Parent and script.Parent.Parent:FindFirstChild(name))
-    end
-
-    local rep = game:GetService("ReplicatedStorage")
-    local repoFolder = rep and rep:FindFirstChild("LightHub")
-    if repoFolder then
-        table.insert(candidates, repoFolder:FindFirstChild(name))
-    end
-
-    for _, candidate in ipairs(candidates) do
-        if candidate and candidate:IsA("ModuleScript") then
-            return require(candidate)
-        end
-    end
-
     local BASE = "https://raw.githubusercontent.com/confessess/AR097125409721047210947/main/"
+    local url = BASE .. name .. ".lua"
+
     local ok, result = pcall(function()
-        local source = game:HttpGet(BASE .. name .. ".lua")
-        local compiled = loadstring(source)
-        if not compiled then
-            error("Remote source for " .. name .. " was empty or invalid")
+        local source = game:HttpGet(url)
+        if type(source) ~= "string" or source:match("^%s*$") then
+            error("Remote source for " .. name .. " was empty")
         end
+
+        local compiled, compileError = loadstring(source)
+        if not compiled then
+            error("Remote source for " .. name .. " was invalid: " .. tostring(compileError))
+        end
+
         return compiled()
     end)
 
     if not ok then
-        error("Failed to load module " .. name .. ": " .. tostring(result))
+        error("Failed to load module " .. name .. " from GitHub: " .. tostring(result))
     end
 
     return result
@@ -43,6 +32,7 @@ local WorldModule = loadModule("world")
 local SkinChangerModule = loadModule("skinchanger")
 
 local Gui = GuiModule:Init()
+print("[BOOT] GUI created")
 
 Gui:CreateTab("Combat", "Aimbot, silent aim, hitbox, kill all.")
 Gui:CreateTab("Visuals", "ESP and world rendering.")
@@ -51,17 +41,35 @@ Gui:CreateTab("Movement", "Speed, jump, and fly settings.")
 Gui:CreateTab("Skin Changer", "Announcers, arms, and melee skins.")
 Gui:CreateTab("World", "World modifications.")
 Gui:CreateTab("Settings", "GUI preferences, keybinds, configs.")
+print("[BOOT] Tab list after creation:", table.concat(function()
+    local names = {}
+    for _, tab in ipairs(Gui.Tabs or {}) do
+        table.insert(names, tab.Name)
+    end
+    return names
+end(), ", "))
 
+print("[BOOT] Initializing modules")
+print("[BOOT] CombatModule type:", type(CombatModule), "Init:", type(CombatModule and CombatModule.Init))
+print("[BOOT] Gui has SetTabRebuild:", type(Gui.SetTabRebuild))
+print("[BOOT] Combat tab exists before Init:", Gui:GetTab("Combat") ~= nil)
 CombatModule:Init(Gui)
+print("[BOOT] Combat tab exists after Init:", Gui:GetTab("Combat") ~= nil)
+if Gui:GetTab("Combat") then
+    print("[BOOT] Combat tab rebuild is now:", Gui:GetTab("Combat").Rebuild ~= nil)
+end
 ESPModule:Init(Gui)
 GunModsModule:Init(Gui)
 MovementModule:Init(Gui)
 WorldModule:Init(Gui)
 SkinChangerModule:Init(Gui)
+print("[BOOT] Modules initialized")
 
 if Gui.CurrentTab then
+    print("[BOOT] Refreshing current tab:", Gui.CurrentTab)
     Gui:SwitchTab(Gui.CurrentTab)
 else
+    print("[BOOT] Switching to Combat")
     Gui:SwitchTab("Combat")
 end
 

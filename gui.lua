@@ -561,7 +561,11 @@ function Gui:SwitchTab(name)
     local tab = self:GetTab(name)
     if tab then
         print("[GUI] Tab exists:", name, "has rebuild:", tab.Rebuild ~= nil)
-        if tab.Rebuild then tab.Rebuild(self) end
+        if tab.Rebuild then
+            print("[GUI] Invoking rebuild for:", name)
+            tab.Rebuild(self)
+            print("[GUI] Rebuild finished for:", name)
+        end
     else
         warn("[GUI] Tab missing when switching:", name)
     end
@@ -583,10 +587,18 @@ end
 
 function Gui:SetTabRebuild(name, callback)
     print("[GUI] Registering rebuild for:", name)
+    print("[GUI] Existing tabs before registration:", table.concat(function()
+        local names = {}
+        for _, tab in ipairs(self.Tabs or {}) do
+            table.insert(names, tab.Name)
+        end
+        return names
+    end(), ", "))
     local tab = self:GetTab(name)
     if tab then
         tab.Rebuild = callback
-        print("[GUI] Rebuild registered for:", name)
+        print("[GUI] Rebuild registered for:", name, "callback type:", type(callback))
+        print("[GUI] After registration, tab rebuild exists:", tab.Rebuild ~= nil)
         if self.CurrentTab == name then
             print("[GUI] Refreshing active tab:", name)
             self:SwitchTab(name)
