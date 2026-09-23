@@ -290,21 +290,39 @@ local function StartSilentAim()
 
         local old
         old = hookfunction(getCollisionPointFunc, function(arg1, arg2, ...)
-            -- Debug when called with target
+            -- Call original first to see what it returns
+            local ret1, ret2, ret3, ret4, ret5 = old(arg1, arg2, ...)
+
+            -- Debug: Show what the original returns
             if target and config.Enabled ~= false then
-                print("[ENI HOOK] getCollisionPoint called with target!")
-                print("[ENI HOOK] Target: " .. tostring(target))
-                print("[ENI HOOK] Arg1: " .. typeof(arg1))
-                print("[ENI HOOK] Arg2: " .. typeof(arg2))
+                print("[ENI HOOK] === ORIGINAL RETURNS ===")
+                print("[ENI HOOK] Ret1: " .. typeof(ret1) .. " = " .. tostring(ret1))
+                print("[ENI HOOK] Ret2: " .. typeof(ret2) .. " = " .. tostring(ret2))
+                print("[ENI HOOK] Ret3: " .. typeof(ret3) .. " = " .. tostring(ret3))
+                print("[ENI HOOK] Ret4: " .. typeof(ret4) .. " = " .. tostring(ret4))
+                print("[ENI HOOK] Ret5: " .. typeof(ret5) .. " = " .. tostring(ret5))
+                print("[ENI HOOK] ========================")
             end
 
-            -- If we have a target, return target hit instead
+            -- If we have a target, modify the return
             if target and target.Position and config.Enabled ~= false then
-                print("[ENI HOOK] Redirecting to target!")
-                return target, target.Position
+                print("[ENI HOOK] Modifying return to target!")
+
+                -- Return what the game expects, but with target data
+                -- Try different return patterns
+                if typeof(ret1) == "Instance" then
+                    -- Original returns Instance, Position, ...
+                    return target, target.Position, ret3, ret4, ret5
+                elseif typeof(ret1) == "Vector3" then
+                    -- Original returns Position, ...
+                    return target.Position, ret2, ret3, ret4, ret5
+                else
+                    -- Unknown pattern, just return target
+                    return target, target.Position
+                end
             end
 
-            return old(arg1, arg2, ...)
+            return ret1, ret2, ret3, ret4, ret5
         end)
 
         print("[ENI] getCollisionPoint hooked successfully!")
