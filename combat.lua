@@ -140,6 +140,7 @@ local function StartSilentAim()
     local randomHitPartEnabled = false
     local randomCycleTimer = 0
     local RANDOM_CYCLE_INTERVAL = 0.1  -- Cycle every 100ms
+    local frameCount = 0  -- For debug timing
 
     -- Available hit parts for random mode
     local HIT_PARTS = {"Head", "UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}
@@ -213,19 +214,28 @@ local function StartSilentAim()
         local closestDist = math.huge
         local mousePos = UserInputService:GetMouseLocation()
 
+        -- DEBUG: Count players checked
+        local checked = 0
+        local valid = 0
+        local hasPart = 0
+        local onScreen = 0
+
         for _, plr in ipairs(Players:GetPlayers()) do
+            checked = checked + 1
             if not IsValidTarget(plr) then continue end
+            valid = valid + 1
             local char = plr.Character
 
             -- Get hit part (respects random mode)
             local targetPart = GetHitPart(char)
             if not targetPart then continue end
+            hasPart = hasPart + 1
 
-            -- Must have line of sight
-            if not HasLineOfSight(targetPart) then continue end
+            -- NO WALL CHECK - removed for debugging
 
-            local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-            if not onScreen then continue end
+            local screenPos, visible = Camera:WorldToViewportPoint(targetPart.Position)
+            if not visible then continue end
+            onScreen = onScreen + 1
 
             -- Distance from MOUSE (not screen center)
             local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
@@ -240,6 +250,12 @@ local function StartSilentAim()
                 }
             end
         end
+
+        -- DEBUG: Show scan results every 2 seconds
+        if frameCount % 120 == 0 then
+            print("[ENI SCAN] Checked: " .. checked .. " | Valid: " .. valid .. " | HasPart: " .. hasPart .. " | OnScreen: " .. onScreen)
+        end
+
         return closest
     end
 
@@ -309,6 +325,8 @@ local function StartSilentAim()
     local UPDATE_INTERVAL = 0.05
 
     RunService.RenderStepped:Connect(function(dt)
+        frameCount = frameCount + 1
+
         -- Random hit part cycling
         if randomHitPartEnabled then
             randomCycleTimer = randomCycleTimer + dt
@@ -345,8 +363,22 @@ local function StartSilentAim()
         if now - lastUpdate < UPDATE_INTERVAL then return end
         lastUpdate = now
 
+        -- DEBUG: Show we're looking for targets
+        if frameCount % 120 == 0 then  -- Every 2 seconds
+            print("[ENI DEBUG] Looking for targets... Enabled: " .. tostring(config.Enabled))
+        end
+
         -- Get best target closest to mouse with LOS
         local newTarget = GetTargetClosestToMouse()
+
+        -- DEBUG: Show target result
+        if frameCount % 120 == 0 then
+            print("[ENI DEBUG] Target found: " .. tostring(newTarget and newTarget.player.Name or "NONE"))
+            if newTarget then
+                print("[ENI DEBUG] Target part: " .. tostring(newTarget.part))
+                print("[ENI DEBUG] Target distance: " .. tostring(newTarget.distance))
+            end
+        end
 
         -- Check if target changed or became invalid
         local shouldRestore = false
@@ -435,6 +467,190 @@ local function StartSilentAim()
     print("[ENI] - Hit Part: " .. tostring(config.HitPart or "Head"))
     print("[ENI] - Random Hit Part available via __ToggleRandomHitPart")
 end
+
+-- ============================================================
+-- MAGIC BULLET (RAGE MODE)
+-- ============================================================
+
+local MagicBulletRunning = false
+local magicBulletTarget = nil
+local magicBulletExpanded = false
+
+local function StartMagicBullet()
+    if MagicBulletRunning then return end
+    MagicBulletRunning = true
+
+    print("[ENI] Starting MAGIC BULLET (RAGE MODE)...")
+
+    -- Store config
+    getgenv().__MagicBulletConfig = getgenv().__MagicBulletConfig or {}
+    local mbConfig = getgenv().__MagicBulletConfig
+    mbConfig.Enabled = false
+    mbConfig.Size = 50  -- HUGE hitbox
+    mbConfig.TeamCheck = true
+
+    -- State
+    local currentTarget = nil
+    local currentTargetChar = nil
+    local OriginalData = {}
+
+    -- Helper: Find target closest to crosshair (NO WALL CHECK)
+    local function GetTargetClosestToCrosshair()
+        local closest = nil
+        local closestDist = math.huge
+        local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr == LocalPlayer then continue end
+            if not plr.Character then continue end
+
+            -- Basic validity check (alive, spawned)
+            local char = plr.Character
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            if not humanoid or humanoid.Health <= 0 then continue end
+            local spawned = char:FindFirstChild("Spawned")
+            if spawned and not spawned.Value then continue end
+
+            -- Team check
+            if mbConfig.TeamCheck then
+                local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
+                local ffa = wkspc and wkspc:FindFirstChild("FFA")
+                if not (ffa and ffa.Value) then
+                    if plr.Team == LocalPlayer.Team then continue end
+                end
+            end
+
+            -- Get head
+            local head = char:FindFirstChild("Head") or char:FindFirstChild("HeadHB")
+            if not head then continue end
+
+            -- Distance from crosshair (screen center)
+            local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+            if not onScreen then continue end
+
+            local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
+            if dist < closestDist then
+                closestDist = dist
+                closest = {
+                    player = plr,
+                    part = head,
+                    character = char,
+                    distance = dist
+                }
+            end
+        end
+        return closest
+    end
+
+    -- Expand head to HUGE size
+    local function ExpandHead(targetData)
+        if not targetData or not targetData.part then return end
+        local char = targetData.character
+        if not char then return end
+
+        local head = char:FindFirstChild("Head") or char:FindFirstChild("HeadHB")
+        if not head then return end
+
+        -- Store original
+        if not OriginalData[head] then
+            OriginalData[head] = {
+                Size = head.Size,
+                Transparency = head.Transparency
+            }
+        end
+
+        -- Expand to HUGE size
+        local size = mbConfig.Size or 50
+        head.Size = Vector3.new(size, size, size)
+        head.Transparency = 1  -- Invisible
+        head.CanCollide = false
+
+        magicBulletExpanded = true
+        print("[ENI MAGIC] Expanded " .. targetData.player.Name .. "'s head to " .. size .. " studs")
+    end
+
+    -- Restore head
+    local function RestoreHead()
+        for part, data in pairs(OriginalData) do
+            if part and part.Parent then
+                part.Size = data.Size
+                part.Transparency = data.Transparency
+            end
+        end
+        OriginalData = {}
+        magicBulletExpanded = false
+    end
+
+    -- Main loop
+    local lastUpdate = 0
+    local UPDATE_INTERVAL = 0.05
+
+    RunService.RenderStepped:Connect(function()
+        if mbConfig.Enabled == false then
+            if magicBulletExpanded then
+                RestoreHead()
+                currentTarget = nil
+                currentTargetChar = nil
+            end
+            return
+        end
+
+        local now = tick()
+        if now - lastUpdate < UPDATE_INTERVAL then return end
+        lastUpdate = now
+
+        -- Get target closest to crosshair
+        local newTarget = GetTargetClosestToCrosshair()
+
+        -- Check if target changed
+        if currentTarget and (not newTarget or newTarget.player ~= currentTarget.player) then
+            RestoreHead()
+            currentTarget = nil
+            currentTargetChar = nil
+        end
+
+        -- Expand new target
+        if newTarget and (not currentTarget or newTarget.player ~= currentTarget.player) then
+            currentTarget = newTarget
+            currentTargetChar = newTarget.character
+            ExpandHead(newTarget)
+        end
+
+        -- Verify current target still valid
+        if currentTarget then
+            local char = currentTarget.character
+            if not char or not char.Parent then
+                RestoreHead()
+                currentTarget = nil
+                currentTargetChar = nil
+            else
+                local humanoid = char:FindFirstChildOfClass("Humanoid")
+                if not humanoid or humanoid.Health <= 0 then
+                    RestoreHead()
+                    currentTarget = nil
+                    currentTargetChar = nil
+                end
+            end
+        end
+    end)
+
+    -- Cleanup on player leaving
+    Players.PlayerRemoving:Connect(function(plr)
+        if currentTarget and currentTarget.player == plr then
+            RestoreHead()
+            currentTarget = nil
+            currentTargetChar = nil
+        end
+    end)
+
+    print("[ENI] Magic Bullet ready! Enable it in the GUI.")
+end
+
+-- Auto-start Magic Bullet system
+task.spawn(function()
+    task.wait(1)
+    StartMagicBullet()
+end)
 
 local function StopSilentAim()
     SilentAimRunning = false
@@ -843,6 +1059,25 @@ function Combat:Init(Gui)
         y = g:CreateToggle("Show FOV Circle", false, function(state)
             if getgenv().__ToggleFOVCircle then
                 getgenv().__ToggleFOVCircle(state)
+            end
+        end, y)
+
+        -- MAGIC BULLET SECTION
+        y = g:CreateSection("Magic Bullet (RAGE)", y + 10)
+        y = g:CreateToggle("Enabled", false, function(state)
+            if getgenv().__MagicBulletConfig then
+                getgenv().__MagicBulletConfig.Enabled = state
+                print("[ENI] Magic Bullet: " .. (state and "ON" or "OFF"))
+            end
+        end, y)
+        y = g:CreateSlider("Hitbox Size", 10, 100, 50, function(val)
+            if getgenv().__MagicBulletConfig then
+                getgenv().__MagicBulletConfig.Size = val
+            end
+        end, y)
+        y = g:CreateToggle("Team Check", true, function(state)
+            if getgenv().__MagicBulletConfig then
+                getgenv().__MagicBulletConfig.TeamCheck = state
             end
         end, y)
         y = g:CreateToggle("Team Check", true, function(state)
