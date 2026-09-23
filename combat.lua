@@ -810,8 +810,8 @@ function Combat:Init(Gui)
             Combat.Config.FOV = val
         end, y)
 
-        y = g:CreateSection("Silent Aim", y + 10)
-        y = g:CreateToggle("Silent Aim", Combat.Config.SilentAimEnabled, function(state)
+        y = g:CreateSection("Silent Aim (FOV HBE)", y + 10)
+        y = g:CreateToggle("Enabled", Combat.Config.SilentAimEnabled, function(state)
             Combat.Config.SilentAimEnabled = state
             if state then
                 StartSilentAim()
@@ -819,11 +819,19 @@ function Combat:Init(Gui)
                 StopSilentAim()
             end
         end, y)
-        y = g:CreateSlider("Silent Aim FOV", 50, 500, Combat.Config.SilentAimFOV, function(val)
+        y = g:CreateSlider("FOV Size", 50, 500, Combat.Config.SilentAimFOV, function(val)
             Combat.Config.SilentAimFOV = val
         end, y)
-        y = g:CreateDropdown("Hit Part", {"Head", "HumanoidRootPart"}, Combat.Config.SilentAimHitPart, function(val)
+        y = g:CreateDropdown("Hit Part", {"Head", "HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso", "Left Arm", "Right Arm", "Left Leg", "Right Leg"}, Combat.Config.SilentAimHitPart, function(val)
             Combat.Config.SilentAimHitPart = val
+        end, y)
+        y = g:CreateToggle("Random Hit Part", false, function(state)
+            if getgenv().__ToggleRandomHitPart then
+                getgenv().__ToggleRandomHitPart(state)
+            end
+        end, y)
+        y = g:CreateToggle("Team Check", true, function(state)
+            Combat.Config.TeamCheck = state
         end, y)
         y = g:CreateToggle("Prediction", Combat.Config.SilentAimPrediction, function(state)
             Combat.Config.SilentAimPrediction = state
