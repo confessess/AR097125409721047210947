@@ -126,32 +126,46 @@ local function StartSilentAim()
     if SilentAimRunning then return end
     SilentAimRunning = true
 
-    -- Find the Raycast function
-    local RaycastFunction = nil
+    -- Try hooking multiple functions to find the right one
+    local functionsToHook = {}
+
     for _, v in pairs(getgc()) do
         if type(v) == "function" and islclosure(v) then
             local name = debug.info(v, "n")
             local consts = debug.getconstants(v)
+
+            -- Candidate 1: Raycast function
             if name == "Raycast" and #consts == 7 and consts[1] == "FindPartOnRayWithIgnoreList" then
-                RaycastFunction = v
-                break
+                table.insert(functionsToHook, {name = "Raycast", func = v})
+            end
+
+            -- Candidate 2: doRay function
+            if name == "doRay" and #consts == 12 then
+                table.insert(functionsToHook, {name = "doRay", func = v})
+            end
+
+            -- Candidate 3: firebullet function
+            if name == "firebullet" then
+                table.insert(functionsToHook, {name = "firebullet", func = v})
+            end
+
+            -- Candidate 4: Any function with FindPartOnRayWithIgnoreList
+            for _, c in ipairs(consts) do
+                if c == "FindPartOnRayWithIgnoreList" then
+                    table.insert(functionsToHook, {name = name or "unknown", func = v})
+                    break
+                end
             end
         end
     end
 
-    if not RaycastFunction then
-        warn("[ENI] Could not find Raycast function")
-        SilentAimRunning = false
-        return
-    end
+    print("[ENI] Found " .. #functionsToHook .. " candidate functions to hook")
 
-    print("[ENI] Found Raycast function, hooking directly...")
-
-    -- Store config in globals for the hook to access
+    -- Store config in globals
     getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
     local config = getgenv().__SilentAimConfig
 
-    -- Helper functions (defined outside the hook)
+    -- Helper functions
     local function IsValidTarget(plr)
         if plr == LocalPlayer then return false end
         if not plr.Character then return false end
@@ -207,20 +221,6 @@ local function StartSilentAim()
             end
         end
 
-        if closest and closest.Parent and config.BodyHitEnabled then
-            local chance = config.BodyHitChance or 0
-            if math.random(1, 100) <= chance then
-                local bodyParts = {"UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"}
-                for _, partName in ipairs(bodyParts) do
-                    local part = closest.Parent:FindFirstChild(partName)
-                    if part then
-                        closest = part
-                        break
-                    end
-                end
-            end
-        end
-
         return closest
     end
 
@@ -234,43 +234,49 @@ local function StartSilentAim()
         target = GetClosestPlayer()
     end)
 
-    -- Hook the Raycast function directly (no actor needed)
-    local callCount = 0
-    local old
-    old = hookfunction(RaycastFunction, function(ray, ignoreList, ...)
-        callCount = callCount + 1
+    -- Hook ALL candidate functions
+    for _, candidate in ipairs(functionsToHook) do
+        local func = candidate.func
+        local name = candidate.name
+        local callCount = 0
 
-        -- Debug every 60 calls
-        if callCount % 60 == 0 then
-            print("[ENI DEBUG] Raycast called " .. callCount .. " times")
-            print("[ENI DEBUG] Target: " .. tostring(target))
-            print("[ENI DEBUG] Enabled: " .. tostring(config.Enabled))
-        end
+        print("[ENI] Hooking " .. name .. "...")
 
-        if target and target.Position and config.Enabled ~= false then
-            print("[ENI DEBUG] Redirecting shot to: " .. target.Name)
+        local old
+        old = hookfunction(func, function(...)
+            callCount = callCount + 1
+            local args = {...}
 
-            local aimPos = target.Position
-            if config.Prediction then
-                local velocity = target.AssemblyLinearVelocity or Vector3.new()
-                local distance = (target.Position - Camera.CFrame.Position).Magnitude
-                local bulletSpeed = 3000
-                local travelTime = distance / bulletSpeed
-                local ping = LocalPlayer:GetNetworkPing() or 0
-                aimPos = target.Position + (velocity * (travelTime + ping * 0.5))
+            -- Debug every 30 calls
+            if callCount % 30 == 0 then
+                print("[ENI DEBUG] " .. name .. " called " .. callCount .. " times")
+                print("[ENI DEBUG] Target: " .. tostring(target))
+                print("[ENI DEBUG] Args count: " .. #args)
             end
 
-            -- Create new ray pointing at target
-            local origin = ray.Origin
-            local direction = (aimPos - origin).Unit * (aimPos - origin).Magnitude
-            local newRay = Ray.new(origin, direction)
+            -- If we have a target and this might be a bullet function
+            if target and target.Position and config.Enabled ~= false then
+                print("[ENI DEBUG] " .. name .. " - We have target, checking args...")
 
-            return old(newRay, ignoreList, ...)
-        end
-        return old(ray, ignoreList, ...)
-    end)
+                -- Try to modify based on argument patterns
+                for i, arg in ipairs(args) do
+                    if typeof(arg) == "Ray" then
+                        print("[ENI DEBUG] Found Ray at arg " .. i .. ", modifying...")
+                        local aimPos = target.Position
+                        local origin = arg.Origin
+                        local direction = (aimPos - origin).Unit * (aimPos - origin).Magnitude
+                        args[i] = Ray.new(origin, direction)
+                    elseif typeof(arg) == "Vector3" and i <= 2 then
+                        print("[ENI DEBUG] Found Vector3 at arg " .. i .. ", might be direction")
+                    end
+                end
+            end
 
-    print("[ENI] Silent aim hooked successfully!")
+            return old(unpack(args))
+        end)
+    end
+
+    print("[ENI] Hooked " .. #functionsToHook .. " functions")
 end
 
 local function StopSilentAim()

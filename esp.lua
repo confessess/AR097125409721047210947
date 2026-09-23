@@ -50,11 +50,11 @@ local function HideAllChams()
 end
 
 local function HideAll3DBoxes()
-    for _, hl in pairs(BoxHighlights) do
-        if hl then
-            hl.Enabled = false
-            hl.Adornee = nil
-            hl.Parent = nil
+    for _, box in pairs(BoxHighlights) do
+        if box then
+            box.Visible = false
+            box.Adornee = nil
+            box.Parent = nil
         end
     end
 end
@@ -128,12 +128,13 @@ local function CreateESP(player)
     end
 
     if not BoxHighlights[player] then
-        local boxHl = Instance.new("Highlight")
+        local boxHl = Instance.new("SelectionBox")
         boxHl.Name = "ESP3DBox"
-        boxHl.FillTransparency = 1
-        boxHl.OutlineTransparency = 0
-        boxHl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        boxHl.Enabled = false
+        boxHl.LineThickness = 0.06
+        boxHl.Transparency = 0
+        boxHl.Color3 = ESP.Config.Color
+        boxHl.Visible = false
+        boxHl.Adornee = nil
         BoxHighlights[player] = boxHl
     end
 
@@ -193,8 +194,9 @@ local function UpdateESP()
             end
             local boxHl = BoxHighlights[player]
             if boxHl then
-                boxHl.Enabled = false
+                boxHl.Visible = false
                 boxHl.Adornee = nil
+                boxHl.Parent = nil
             end
             continue
         end
@@ -347,23 +349,21 @@ local function UpdateESP()
                     local distance = (rootPart.Position - Workspace.CurrentCamera.CFrame.Position).Magnitude
                     if distance <= ESP.Config.RenderDistance then
                         showBox = true
-                        boxHl.Adornee = character
                     end
                 end
             end
         end
-        boxHl.Enabled = showBox
+
         if showBox then
             boxHl.Adornee = character
-            boxHl.Parent = character
-            boxHl.OutlineColor = ESP.Config.Color
-            boxHl.FillTransparency = 1
-            boxHl.OutlineTransparency = 0
-            boxHl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+            boxHl.Parent = character.Parent
+            boxHl.Color3 = ESP.Config.Color
+            boxHl.Visible = true
+            boxHl.Transparency = 0
         else
             boxHl.Adornee = nil
             boxHl.Parent = nil
-            boxHl.Enabled = false
+            boxHl.Visible = false
         end
     end
 end
@@ -375,7 +375,7 @@ Players.PlayerAdded:Connect(function(p) task.wait(1) CreateESP(p) end)
 Players.PlayerRemoving:Connect(function(p)
     RemoveESP(p)
     if BoxHighlights[p] then
-        BoxHighlights[p].Enabled = false
+        BoxHighlights[p].Visible = false
         BoxHighlights[p].Adornee = nil
         BoxHighlights[p].Parent = nil
     end
