@@ -99,8 +99,11 @@ end
 
 --// ScreenGui
 function Gui:Init()
-    local old = PlayerGui:FindFirstChild("BlackoutGUI")
-    if old then old:Destroy() end
+    for _, child in ipairs(PlayerGui:GetChildren()) do
+        if child.Name == "BlackoutGUI" then
+            child:Destroy()
+        end
+    end
 
     local ScreenGui = Instance.new("ScreenGui")
     ScreenGui.Name = "BlackoutGUI"
