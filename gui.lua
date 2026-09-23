@@ -10,22 +10,21 @@ local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 --// Colors
-local BLACK      = Color3.fromRGB(8, 9, 12)
-local BACKGROUND = Color3.fromRGB(18, 19, 24)
-local DARK_PANEL = Color3.fromRGB(24, 25, 31)
-local PANEL_ALT  = Color3.fromRGB(30, 32, 39)
-local RED        = Color3.fromRGB(126, 131, 139)
-local RED_BRIGHT = Color3.fromRGB(162, 168, 178)
-local RED_DARK   = Color3.fromRGB(90, 96, 105)
-local SELECTED   = Color3.fromRGB(142, 147, 157)
-local HOVER      = Color3.fromRGB(35, 38, 46)
-local WHITE      = Color3.fromRGB(245, 245, 247)
-local LIGHT      = Color3.fromRGB(225, 226, 230)
-local GRAY       = Color3.fromRGB(170, 176, 186)
-local BORDER     = Color3.fromRGB(72, 77, 87)
+local BLACK      = Color3.fromRGB(2, 2, 2)
+local BACKGROUND = Color3.fromRGB(7, 7, 7)
+local DARK_PANEL = Color3.fromRGB(14, 14, 14)
+local RED        = Color3.fromRGB(145, 20, 25)
+local RED_BRIGHT = Color3.fromRGB(195, 28, 35)
+local RED_DARK   = Color3.fromRGB(70, 10, 13)
+local SELECTED   = Color3.fromRGB(45, 15, 17)
+local HOVER      = Color3.fromRGB(18, 7, 8)
+local WHITE      = Color3.fromRGB(255, 255, 255)
+local LIGHT      = Color3.fromRGB(225, 225, 225)
+local GRAY       = Color3.fromRGB(150, 150, 150)
+local BORDER     = Color3.fromRGB(65, 25, 27)
 
 --// Wave Config
-local WAVE_COLOR        = Color3.fromRGB(170, 176, 184)
+local WAVE_COLOR        = Color3.fromRGB(255, 130, 130)
 local WAVE_PEAK_TRANS   = 0.82
 local WAVE_BAND_WIDTH   = 0.28
 local WAVE_DURATION     = 2.4
@@ -220,7 +219,7 @@ function Gui:Init()
     Title.Size = UDim2.new(1, -140, 0, 26)
     Title.Position = UDim2.fromOffset(22, 10)
     Title.BackgroundTransparency = 1
-    Title.Text = "LIGHT HUB"
+    Title.Text = "Blackout.cc"
     Title.TextColor3 = WHITE
     Title.TextSize = 20
     Title.Font = Enum.Font.GothamBold
@@ -232,7 +231,7 @@ function Gui:Init()
     Subtitle.Size = UDim2.new(1, -140, 0, 18)
     Subtitle.Position = UDim2.fromOffset(23, 36)
     Subtitle.BackgroundTransparency = 1
-    Subtitle.Text = "Arsenal • Utility Hub"
+    Subtitle.Text = "Made by confess & soph .gg/feuds"
     Subtitle.TextColor3 = GRAY
     Subtitle.TextSize = 11
     Subtitle.Font = Enum.Font.Gotham

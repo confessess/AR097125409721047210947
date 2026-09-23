@@ -1,72 +1,14 @@
-local function debugLog(prefix, ...)
-    local args = { ... }
-    local text = ""
-    for i, v in ipairs(args) do
-        if i > 1 then text = text .. " " end
-        text = text .. tostring(v)
-    end
-    print("[" .. prefix .. "] " .. text)
-end
+local BASE = "https://raw.githubusercontent.com/confessess/88888asnd09an7ds0a897nwd0a8d7a208d7a2809d7aw98d79n8sa7nw982d7san98d7/main/"
 
-local function loadModule(name)
-    debugLog("BOOT", "Loading module:", name)
-
-    if script and script.Parent then
-        local moduleObject = script.Parent:FindFirstChild(name)
-        if moduleObject then
-            debugLog("BOOT", "Using local module:", name, "@", moduleObject:GetFullName())
-            return require(moduleObject)
-        end
-    end
-
-    local BASE = "https://raw.githubusercontent.com/confessess/AR097125409721047210947/main/"
-    local source = game:HttpGet(BASE .. name .. ".lua")
-    if type(source) ~= "string" or source == "" then
-        error("Failed to fetch remote module " .. name .. ": empty or invalid source")
-    end
-
-    local compiler = loadstring or load
-    if type(compiler) ~= "function" then
-        error("Failed to load module " .. name .. ": no supported compiler available")
-    end
-
-    local chunk = compiler(source)
-    if type(chunk) ~= "function" then
-        error("Failed to compile remote module " .. name .. ": compiler returned nil")
-    end
-
-    local ok, result = pcall(function()
-        return chunk()
-    end)
-
-    if not ok then
-        error("Failed to execute remote module " .. name .. ": " .. tostring(result))
-    end
-
-    debugLog("BOOT", "Loaded remote module:", name)
-    return result
-end
-
-print("[BOOT] Starting bootstrap")
-local GuiModule = loadModule("gui")
-local CombatModule = loadModule("combat")
-local ESPModule = loadModule("esp")
-local GunModsModule = loadModule("gunmods")
-local MovementModule = loadModule("movement")
-local WorldModule = loadModule("world")
-local SkinChangerModule = loadModule("skinchanger")
-
-print("[BOOT] Module states:", type(GuiModule), type(CombatModule), type(ESPModule), type(GunModsModule), type(MovementModule), type(WorldModule), type(SkinChangerModule))
-if not GuiModule then error("GuiModule is nil after loadModule('gui')") end
-if not CombatModule then error("CombatModule is nil after loadModule('combat')") end
-if not ESPModule then error("ESPModule is nil after loadModule('esp')") end
-if not GunModsModule then error("GunModsModule is nil after loadModule('gunmods')") end
-if not MovementModule then error("MovementModule is nil after loadModule('movement')") end
-if not WorldModule then error("WorldModule is nil after loadModule('world')") end
-if not SkinChangerModule then error("SkinChangerModule is nil after loadModule('skinchanger')") end
+local GuiModule = loadstring(game:HttpGet(BASE .. "gui.lua"))()
+local CombatModule = loadstring(game:HttpGet(BASE .. "combat.lua"))()
+local ESPModule = loadstring(game:HttpGet(BASE .. "esp.lua"))()
+local GunModsModule = loadstring(game:HttpGet(BASE .. "gunmods.lua"))()
+local MovementModule = loadstring(game:HttpGet(BASE .. "movement.lua"))()
+local WorldModule = loadstring(game:HttpGet(BASE .. "world.lua"))()
+local SkinChangerModule = loadstring(game:HttpGet(BASE .. "skinchanger.lua"))()
 
 local Gui = GuiModule:Init()
-print("[BOOT] GUI created")
 
 Gui:CreateTab("Combat", "Aimbot, silent aim, hitbox, kill all.")
 Gui:CreateTab("Visuals", "ESP and world rendering.")
@@ -75,16 +17,13 @@ Gui:CreateTab("Movement", "Speed, jump, and fly settings.")
 Gui:CreateTab("Skin Changer", "Announcers, arms, and melee skins.")
 Gui:CreateTab("World", "World modifications.")
 Gui:CreateTab("Settings", "GUI preferences, keybinds, configs.")
-print("[BOOT] Modules initialized")
 
-print("[BOOT] Initializing modules")
 CombatModule:Init(Gui)
 ESPModule:Init(Gui)
 GunModsModule:Init(Gui)
 MovementModule:Init(Gui)
 WorldModule:Init(Gui)
 SkinChangerModule:Init(Gui)
-print("[BOOT] Modules initialized")
 
 --// CONFIG SYSTEM — automatic save/load
 local CONFIG_PATH = "blackout_config.json"
