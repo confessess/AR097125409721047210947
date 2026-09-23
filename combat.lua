@@ -126,211 +126,224 @@ local function StartSilentAim()
     if SilentAimRunning then return end
     SilentAimRunning = true
 
-    print("[ENI] Starting silent aim with FULL DEBUG...")
+    print("[ENI] Starting Dynamic FOV HBE...")
 
-    -- Use Combat.Config directly
-    local config = {
-        Enabled = Combat.Config.SilentAimEnabled or false,
-        TeamCheck = Combat.Config.TeamCheck ~= false,
-        FOV = Combat.Config.SilentAimFOV or 150,
-        HitPart = Combat.Config.SilentAimHitPart or "Head",
-        Prediction = Combat.Config.SilentAimPrediction == true,
-        BodyHitEnabled = Combat.Config.BodyHitEnabled == true,
-        BodyHitChance = Combat.Config.BodyHitChance or 0,
-    }
+    -- Store config in globals
+    getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
+    local config = getgenv().__SilentAimConfig
 
-    -- Update config every frame from Combat.Config
-    local function UpdateConfig()
-        config.Enabled = Combat.Config.SilentAimEnabled or false
-        config.TeamCheck = Combat.Config.TeamCheck ~= false
-        config.FOV = Combat.Config.SilentAimFOV or 150
-        config.HitPart = Combat.Config.SilentAimHitPart or "Head"
-        config.Prediction = Combat.Config.SilentAimPrediction == true
-        config.BodyHitEnabled = Combat.Config.BodyHitEnabled == true
-        config.BodyHitChance = Combat.Config.BodyHitChance or 0
-    end
+    -- State
+    local currentTarget = nil
+    local currentTargetChar = nil
+    local expandedParts = {}
 
-    -- Helper functions with DEBUG
+    -- Helper functions
     local function IsValidTarget(plr)
-        if plr == LocalPlayer then 
-            return false 
-        end
-        if not plr.Character then 
-            print("[ENI DEBUG] " .. plr.Name .. " has no character")
-            return false 
-        end
+        if plr == LocalPlayer then return false end
+        if not plr.Character then return false end
         local char = plr.Character
         local humanoid = char:FindFirstChildOfClass("Humanoid")
-        if not humanoid then 
-            print("[ENI DEBUG] " .. plr.Name .. " has no humanoid")
-            return false 
+        if not humanoid or humanoid.Health <= 0 then return false end
+        local spawned = char:FindFirstChild("Spawned")
+        if spawned and not spawned.Value then return false end
+        local status = char:FindFirstChild("Status")
+        if status then
+            local alive = status:FindFirstChild("Alive")
+            if alive and not alive.Value then return false end
         end
-        if humanoid.Health <= 0 then 
-            print("[ENI DEBUG] " .. plr.Name .. " is dead")
-            return false 
-        end
-
-        -- Team check
         if config.TeamCheck ~= false then
             local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
             local ffa = wkspc and wkspc:FindFirstChild("FFA")
             if not (ffa and ffa.Value) then
-                if plr.Team == LocalPlayer.Team then 
-                    print("[ENI DEBUG] " .. plr.Name .. " is teammate")
-                    return false 
-                end
+                if plr.Team == LocalPlayer.Team then return false end
             end
         end
-
-        print("[ENI DEBUG] " .. plr.Name .. " is VALID target")
         return true
     end
 
-    local function GetClosestPlayer()
-        local closestDistance = math.huge
+    local function HasLineOfSight(targetPart)
+        if not targetPart then return false end
+        local origin = Camera.CFrame.Position
+        local direction = targetPart.Position - origin
+        local params = RaycastParams.new()
+        params.FilterType = Enum.RaycastFilterType.Exclude
+        params.FilterDescendantsInstances = {LocalPlayer.Character, targetPart.Parent}
+        params.IgnoreWater = true
+        local result = Workspace:Raycast(origin, direction, params)
+        -- If no hit or hit is part of target, we have LOS
+        return not result or result.Instance:IsDescendantOf(targetPart.Parent)
+    end
+
+    local function GetTargetInFOV()
         local closest = nil
+        local closestDist = math.huge
         local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
         local fov = config.FOV or 150
         local hitPartName = config.HitPart or "Head"
 
-        print("[ENI SCAN] Starting scan... FOV: " .. fov .. " | HitPart: " .. hitPartName)
-
-        for _, v in pairs(Players:GetPlayers()) do
-            print("[ENI SCAN] Checking player: " .. v.Name)
-            if not IsValidTarget(v) then continue end
-
-            local char = v.Character
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if not IsValidTarget(plr) then continue end
+            local char = plr.Character
             local targetPart = char:FindFirstChild(hitPartName)
-            if not targetPart then 
-                print("[ENI SCAN] " .. v.Name .. " has no " .. hitPartName)
-                targetPart = char:FindFirstChild("Head") 
-            end
-            if not targetPart then 
-                print("[ENI SCAN] " .. v.Name .. " has no Head either")
-                continue 
-            end
+            if not targetPart then targetPart = char:FindFirstChild("Head") end
+            if not targetPart then continue end
 
-            print("[ENI SCAN] Found part: " .. targetPart.Name)
+            -- Must have line of sight
+            if not HasLineOfSight(targetPart) then continue end
 
-            -- Skip LOS check for now (too strict)
             local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-            if not onScreen then 
-                print("[ENI SCAN] " .. targetPart.Name .. " not on screen")
-                continue 
-            end
-
+            if not onScreen then continue end
             local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
-            print("[ENI SCAN] Distance: " .. dist .. " | FOV: " .. fov)
-
-            if dist < closestDistance and dist < fov then
-                closestDistance = dist
-                closest = targetPart
-                print("[ENI SCAN] New closest: " .. targetPart.Name .. " at " .. dist)
+            if dist < closestDist and dist < fov then
+                closestDist = dist
+                closest = {
+                    player = plr,
+                    part = targetPart,
+                    distance = dist,
+                    screenPos = screenPos
+                }
             end
         end
-
-        print("[ENI SCAN] Result: " .. tostring(closest))
-
         return closest
     end
 
-    -- Update target every frame with HEAVY debug
-    local target = nil
-    local frameCount = 0
-    local hasPrintedInitial = false
+    local function RestoreHitbox(char)
+        if not char then return end
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                local originalSize = part:GetAttribute("OriginalSize")
+                local originalTransp = part:GetAttribute("OriginalTransparency")
+                if originalSize then
+                    part.Size = originalSize
+                    part.Transparency = originalTransp or 0
+                    part:SetAttribute("OriginalSize", nil)
+                    part:SetAttribute("OriginalTransparency", nil)
+                end
+            end
+        end
+    end
+
+    local function ExpandHitboxToFOV(targetData)
+        if not targetData or not targetData.part then return end
+        local char = targetData.part.Parent
+        if not char then return end
+
+        -- Calculate expansion size based on distance and FOV
+        -- Closer = bigger expansion, Farther = smaller
+        local distance = (targetData.part.Position - Camera.CFrame.Position).Magnitude
+        local fov = config.FOV or 150
+
+        -- Base size on FOV and distance
+        -- At close range, expand to fill more of FOV
+        local baseSize = math.clamp(distance * 0.5, 5, 20)
+
+        -- Expand all hitbox parts
+        local hitboxParts = {"Head", "UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"}
+        for _, partName in ipairs(hitboxParts) do
+            local part = char:FindFirstChild(partName)
+            if part and part:IsA("BasePart") then
+                -- Store original if not already stored
+                if not part:GetAttribute("OriginalSize") then
+                    part:SetAttribute("OriginalSize", part.Size)
+                    part:SetAttribute("OriginalTransparency", part.Transparency)
+                end
+
+                -- Expand to fill FOV
+                part.Size = Vector3.new(baseSize, baseSize, baseSize)
+                part.Transparency = 0.7  -- Semi-transparent so you can see them
+                part.CanCollide = false
+
+                table.insert(expandedParts, part)
+            end
+        end
+    end
+
+    -- Main update loop
+    local lastUpdate = 0
+    local UPDATE_INTERVAL = 0.05  -- Update every 50ms for responsiveness
 
     RunService.RenderStepped:Connect(function()
-        frameCount = frameCount + 1
-
-        -- Update config from main Config every frame
-        UpdateConfig()
-
-        -- Print first frame to show it's working
-        if not hasPrintedInitial then
-            print("[ENI FRAME] RenderStepped connected! Frame: " .. frameCount)
-            print("[ENI FRAME] Config.Enabled: " .. tostring(config.Enabled))
-            hasPrintedInitial = true
-        end
-
+        -- Check if enabled
         if config.Enabled == false then
-            if frameCount % 60 == 0 then
-                print("[ENI FRAME] Silent aim DISABLED (frame " .. frameCount .. ") | Config.Enabled: " .. tostring(config.Enabled))
+            -- Restore current target if exists
+            if currentTargetChar then
+                RestoreHitbox(currentTargetChar)
+                currentTargetChar = nil
+                currentTarget = nil
             end
-            target = nil
             return
         end
 
-        -- Scan every 60 frames (1 second)
-        if frameCount % 60 == 0 then
-            print("[ENI FRAME] ========================================")
-            print("[ENI FRAME] Scanning for targets... (frame " .. frameCount .. ")")
-            print("[ENI FRAME] Config.Enabled: " .. tostring(config.Enabled))
-            print("[ENI FRAME] Config.FOV: " .. tostring(config.FOV))
-            print("[ENI FRAME] Config.HitPart: " .. tostring(config.HitPart))
-            target = GetClosestPlayer()
-            print("[ENI FRAME] Target result: " .. tostring(target))
-            print("[ENI FRAME] ========================================")
+        local now = tick()
+        if now - lastUpdate < UPDATE_INTERVAL then return end
+        lastUpdate = now
+
+        -- Get best target in FOV with LOS
+        local newTarget = GetTargetInFOV()
+
+        -- Check if target changed or became invalid
+        local shouldRestore = false
+        local shouldExpand = false
+
+        if currentTarget and (not newTarget or newTarget.player ~= currentTarget.player) then
+            -- Target changed or lost
+            shouldRestore = true
+        end
+
+        if newTarget and (not currentTarget or newTarget.player ~= currentTarget.player) then
+            -- New target
+            shouldExpand = true
+        end
+
+        -- Restore old target if needed
+        if shouldRestore and currentTargetChar then
+            RestoreHitbox(currentTargetChar)
+            currentTargetChar = nil
+            currentTarget = nil
+            expandedParts = {}
+        end
+
+        -- Expand new target if needed
+        if shouldExpand and newTarget then
+            currentTarget = newTarget
+            currentTargetChar = newTarget.part.Parent
+            ExpandHitboxToFOV(newTarget)
+        end
+
+        -- If we have a target, verify it's still valid
+        if currentTarget then
+            -- Check if still valid
+            if not IsValidTarget(currentTarget.player) then
+                RestoreHitbox(currentTargetChar)
+                currentTarget = nil
+                currentTargetChar = nil
+                expandedParts = {}
+            -- Check if still has LOS
+            elseif not HasLineOfSight(currentTarget.part) then
+                RestoreHitbox(currentTargetChar)
+                currentTarget = nil
+                currentTargetChar = nil
+                expandedParts = {}
+            end
         end
     end)
 
-    -- Hook getCollisionPoint to redirect bullets
-    local getCollisionPointFunc = nil
-    for _, v in pairs(getgc()) do
-        if type(v) == "function" and islclosure(v) then
-            local name = debug.info(v, "n")
-            if name == "getCollisionPoint" then
-                getCollisionPointFunc = v
-                break
+    -- Cleanup on player leaving
+    Players.PlayerRemoving:Connect(function(plr)
+        if currentTarget and currentTarget.player == plr then
+            if currentTargetChar then
+                RestoreHitbox(currentTargetChar)
             end
+            currentTarget = nil
+            currentTargetChar = nil
+            expandedParts = {}
         end
-    end
+    end)
 
-    if getCollisionPointFunc then
-        print("[ENI] Found getCollisionPoint, hooking...")
-
-        local old
-        old = hookfunction(getCollisionPointFunc, function(arg1, arg2, ...)
-            -- Call original first to see what it returns
-            local ret1, ret2, ret3, ret4, ret5 = old(arg1, arg2, ...)
-
-            -- Debug: Show what the original returns
-            if target and config.Enabled ~= false then
-                print("[ENI HOOK] === ORIGINAL RETURNS ===")
-                print("[ENI HOOK] Ret1: " .. typeof(ret1) .. " = " .. tostring(ret1))
-                print("[ENI HOOK] Ret2: " .. typeof(ret2) .. " = " .. tostring(ret2))
-                print("[ENI HOOK] Ret3: " .. typeof(ret3) .. " = " .. tostring(ret3))
-                print("[ENI HOOK] Ret4: " .. typeof(ret4) .. " = " .. tostring(ret4))
-                print("[ENI HOOK] Ret5: " .. typeof(ret5) .. " = " .. tostring(ret5))
-                print("[ENI HOOK] ========================")
-            end
-
-            -- If we have a target, modify the return
-            if target and target.Position and config.Enabled ~= false then
-                print("[ENI HOOK] Modifying return to target!")
-
-                -- Return what the game expects, but with target data
-                -- Try different return patterns
-                if typeof(ret1) == "Instance" then
-                    -- Original returns Instance, Position, ...
-                    return target, target.Position, ret3, ret4, ret5
-                elseif typeof(ret1) == "Vector3" then
-                    -- Original returns Position, ...
-                    return target.Position, ret2, ret3, ret4, ret5
-                else
-                    -- Unknown pattern, just return target
-                    return target, target.Position
-                end
-            end
-
-            return ret1, ret2, ret3, ret4, ret5
-        end)
-
-        print("[ENI] getCollisionPoint hooked successfully!")
-    else
-        warn("[ENI] getCollisionPoint not found!")
-    end
-
-    print("[ENI] Silent aim initialization complete - WAITING FOR TARGET...")
+    print("[ENI] Dynamic FOV HBE active!")
+    print("[ENI] - Expands target hitbox to fill FOV")
+    print("[ENI] - Only when target is visible (no wallbang)")
+    print("[ENI] - Restores when target changes or invalid")
 end
 
 local function StopSilentAim()
