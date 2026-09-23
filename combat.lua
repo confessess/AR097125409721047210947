@@ -53,6 +53,23 @@ SilentFOV_Circle.Transparency = 0.5
 SilentFOV_Circle.Radius = 150
 SilentFOV_Circle.Visible = false
 
+local showFOVCircle = true
+
+local function UpdateFOVCircle()
+    if not FOV_Circle or not SilentFOV_Circle then return end
+
+    local mousePos = UserInputService:GetMouseLocation()
+    FOV_Circle.Position = Vector2.new(mousePos.X, mousePos.Y)
+    FOV_Circle.Radius = Combat.Config.FOV
+    FOV_Circle.Visible = Combat.Config.AimbotEnabled and showFOVCircle
+
+    if Camera and Camera.ViewportSize then
+        SilentFOV_Circle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    end
+    SilentFOV_Circle.Radius = Combat.Config.SilentAimFOV
+    SilentFOV_Circle.Visible = Combat.Config.SilentAimEnabled and showFOVCircle
+end
+
 local function IsVisible(targetPart)
     if not Combat.Config.WallCheck then return true end
     if not targetPart then return false end
@@ -1066,8 +1083,11 @@ function Combat:Init(Gui)
             Combat.Config.SilentAimEnabled = state
             if state then
                 StartSilentAim()
-            else
+            end
+            UpdateFOVCircle()
+            if not state then
                 StopSilentAim()
+                SilentFOV_Circle.Visible = false
             end
         end, y)
         y = g:CreateSlider("FOV Size", 50, 500, Combat.Config.SilentAimFOV, function(val)
@@ -1081,10 +1101,12 @@ function Combat:Init(Gui)
                 getgenv().__ToggleRandomHitPart(state)
             end
         end, y)
-        y = g:CreateToggle("Show FOV Circle", false, function(state)
+        y = g:CreateToggle("Show FOV Circle", showFOVCircle, function(state)
+            showFOVCircle = state
             if getgenv().__ToggleFOVCircle then
                 getgenv().__ToggleFOVCircle(state)
             end
+            UpdateFOVCircle()
         end, y)
 
         y = g:CreateSection("Hitbox Expander", y + 10)
