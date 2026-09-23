@@ -614,7 +614,7 @@ function Gui:CreateSection(text, y)
     local Divider = Instance.new("Frame")
     Divider.Size = UDim2.new(1, 0, 0, 1)
     Divider.Position = UDim2.fromOffset(0, y + 28)
-    Divider.BackgroundColor3 = Color3.fromRGB(65, 30, 31)
+    Divider.BackgroundColor3 = BORDER
     Divider.BorderSizePixel = 0
     Divider.ZIndex = 3
     Divider.Parent = self.Content
