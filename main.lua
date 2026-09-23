@@ -8,6 +8,36 @@ local function debugLog(prefix, ...)
     print("[" .. prefix .. "] " .. text)
 end
 
+local function safeExecRemoteScript(url)
+    local ok, source = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if not ok or type(source) ~= "string" or source == "" then
+        error("Remote bootstrap failed: unable to fetch " .. tostring(url))
+    end
+
+    local compiler = (loadstring or load)
+    if type(compiler) ~= "function" then
+        error("Remote bootstrap failed: neither loadstring nor load is available on this executor")
+    end
+
+    local compileOK, compiled = pcall(function()
+        return compiler(source)
+    end)
+    if not compileOK or type(compiled) ~= "function" then
+        error("Remote bootstrap failed: script source did not compile")
+    end
+
+    local runOK, result = pcall(function()
+        return compiled()
+    end)
+    if not runOK then
+        error("Remote bootstrap failed at runtime: " .. tostring(result))
+    end
+
+    return result
+end
+
 local function loadModule(name)
     debugLog("BOOT", "Loading module:", name)
 
