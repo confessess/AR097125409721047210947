@@ -521,7 +521,10 @@ function Gui:CreateTab(name, description)
     local tabData = { Name = name, Description = description, Elements = {} }
     table.insert(self.Tabs, tabData)
 
-    if #self.Tabs == 1 then self:SwitchTab(name) end
+    if #self.Tabs == 1 then
+        self.CurrentTab = name
+    end
+
     return tabData
 end
 
