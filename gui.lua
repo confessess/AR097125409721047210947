@@ -10,18 +10,18 @@ local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 --// Colors
-local BLACK      = Color3.fromRGB(9, 9, 9)
-local BACKGROUND = Color3.fromRGB(18, 18, 18)
-local DARK_PANEL = Color3.fromRGB(28, 28, 28)
-local RED        = Color3.fromRGB(110, 110, 110)
-local RED_BRIGHT = Color3.fromRGB(170, 170, 170)
-local RED_DARK   = Color3.fromRGB(78, 78, 78)
-local SELECTED   = Color3.fromRGB(48, 48, 48)
-local HOVER      = Color3.fromRGB(35, 35, 35)
+local BLACK      = Color3.fromRGB(12, 12, 12)
+local BACKGROUND = Color3.fromRGB(22, 22, 22)
+local DARK_PANEL = Color3.fromRGB(34, 34, 34)
+local RED        = Color3.fromRGB(130, 130, 130)
+local RED_BRIGHT = Color3.fromRGB(175, 175, 175)
+local RED_DARK   = Color3.fromRGB(92, 92, 92)
+local SELECTED   = Color3.fromRGB(58, 58, 58)
+local HOVER      = Color3.fromRGB(40, 40, 40)
 local WHITE      = Color3.fromRGB(255, 255, 255)
-local LIGHT      = Color3.fromRGB(225, 225, 225)
-local GRAY       = Color3.fromRGB(150, 150, 150)
-local BORDER     = Color3.fromRGB(85, 85, 85)
+local LIGHT      = Color3.fromRGB(232, 232, 232)
+local GRAY       = Color3.fromRGB(160, 160, 160)
+local BORDER     = Color3.fromRGB(100, 100, 100)
 
 --// Wave Config
 local WAVE_COLOR        = Color3.fromRGB(210, 210, 210)
@@ -83,6 +83,22 @@ StartMouseUnlockLoop()
 
 --// Toggle state storage
 Gui.ToggleStates = {}
+
+local function ApplySelectedGradient(button, enabled)
+    if not button then return end
+    local gradient = button:FindFirstChild("SelectedGradient")
+    if not gradient then
+        gradient = Instance.new("UIGradient")
+        gradient.Name = "SelectedGradient"
+        gradient.Rotation = 90
+        gradient.Color = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, Color3.fromRGB(78, 78, 78)),
+            ColorSequenceKeypoint.new(1, Color3.fromRGB(48, 48, 48))
+        })
+        gradient.Parent = button
+    end
+    gradient.Enabled = enabled
+end
 
 --// NEW: Get toggle state
 function Gui:GetToggleState(tabName, label)
@@ -462,6 +478,8 @@ function Gui:CreateTab(name, description)
     Button.ZIndex = 3
     Button.Parent = self.Sidebar
 
+    ApplySelectedGradient(Button, false)
+
     local ButtonCorner = Instance.new("UICorner")
     ButtonCorner.CornerRadius = UDim.new(0, 8)
     ButtonCorner.Parent = Button
@@ -524,7 +542,8 @@ end
 function Gui:SwitchTab(name)
     self.CurrentTab = name
     for tabName, data in pairs(self.TabButtons) do
-        if tabName == name then
+        local isSelected = tabName == name
+        if isSelected then
             data.Button.BackgroundColor3 = SELECTED
             data.Text.TextColor3 = WHITE
             data.Indicator.Visible = true
@@ -537,6 +556,7 @@ function Gui:SwitchTab(name)
             data.Stroke.Color = BLACK
             data.Stroke.Transparency = 1
         end
+        ApplySelectedGradient(data.Button, isSelected)
     end
 
     self.ContentTitle.Text = name
@@ -613,7 +633,7 @@ function Gui:CreateSection(text, y)
     local Divider = Instance.new("Frame")
     Divider.Size = UDim2.new(1, 0, 0, 1)
     Divider.Position = UDim2.fromOffset(0, y + 28)
-    Divider.BackgroundColor3 = Color3.fromRGB(65, 30, 31)
+    Divider.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
     Divider.BorderSizePixel = 0
     Divider.ZIndex = 3
     Divider.Parent = self.Content
@@ -667,10 +687,12 @@ function Gui:CreateToggle(label, default, callback, y)
     ToggleStroke.Parent = ToggleBtn
 
     ToggleBtn.MouseEnter:Connect(function()
-        ToggleBtn.BackgroundColor3 = State and Color3.fromRGB(215, 40, 45) or Color3.fromRGB(25, 25, 25)
+        ToggleBtn.BackgroundColor3 = State and Color3.fromRGB(206, 206, 206) or Color3.fromRGB(28, 28, 28)
+        ApplySelectedGradient(ToggleBtn, State)
     end)
     ToggleBtn.MouseLeave:Connect(function()
         ToggleBtn.BackgroundColor3 = State and RED_BRIGHT or DARK_PANEL
+        ApplySelectedGradient(ToggleBtn, State)
     end)
     ToggleBtn.MouseButton1Click:Connect(function()
         State = not State
@@ -679,6 +701,7 @@ function Gui:CreateToggle(label, default, callback, y)
         ToggleBtn.TextColor3 = State and WHITE or GRAY
         ToggleBtn.Text = State and "ON" or "OFF"
         ToggleStroke.Color = State and RED or BORDER
+        ApplySelectedGradient(ToggleBtn, State)
         if callback then callback(State) end
     end)
 
@@ -873,7 +896,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
         OptBtn.Parent = PopupScroll
 
         OptBtn.MouseEnter:Connect(function()
-            OptBtn.BackgroundColor3 = Color3.fromRGB(40, 22, 24)
+            OptBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
         end)
         OptBtn.MouseLeave:Connect(function()
             OptBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
@@ -949,7 +972,7 @@ function Gui:CreateButton(label, callback, y)
     BtnStroke.Parent = Btn
 
     Btn.MouseEnter:Connect(function()
-        Btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        Btn.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
         BtnStroke.Color = RED
     end)
     Btn.MouseLeave:Connect(function()
@@ -1063,6 +1086,7 @@ function Gui:CreateMouseUnlockToggle(y)
     ToggleBtn.AutoButtonColor = false
     ToggleBtn.ZIndex = 4
     ToggleBtn.Parent = ToggleFrame
+    ApplySelectedGradient(ToggleBtn, State)
 
     local ToggleCorner = Instance.new("UICorner")
     ToggleCorner.CornerRadius = UDim.new(0, 6)
@@ -1074,10 +1098,12 @@ function Gui:CreateMouseUnlockToggle(y)
     ToggleStroke.Parent = ToggleBtn
 
     ToggleBtn.MouseEnter:Connect(function()
-        ToggleBtn.BackgroundColor3 = State and Color3.fromRGB(215, 40, 45) or Color3.fromRGB(25, 25, 25)
+        ToggleBtn.BackgroundColor3 = State and Color3.fromRGB(206, 206, 206) or Color3.fromRGB(28, 28, 28)
+        ApplySelectedGradient(ToggleBtn, State)
     end)
     ToggleBtn.MouseLeave:Connect(function()
         ToggleBtn.BackgroundColor3 = State and RED_BRIGHT or DARK_PANEL
+        ApplySelectedGradient(ToggleBtn, State)
     end)
     ToggleBtn.MouseButton1Click:Connect(function()
         State = not State
@@ -1087,6 +1113,7 @@ function Gui:CreateMouseUnlockToggle(y)
         ToggleBtn.TextColor3 = State and WHITE or GRAY
         ToggleBtn.Text = State and "ON" or "OFF"
         ToggleStroke.Color = State and RED or BORDER
+        ApplySelectedGradient(ToggleBtn, State)
     end)
 
     return y + 42
