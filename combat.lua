@@ -735,30 +735,25 @@ function Combat:Init(Gui)
         end, y)
 
         y = g:CreateSection("Kill All", y + 10)
-        for part in pairs(desiredParts) do
-            if not OriginalData[part] then
-                OriginalData[part] = {
-                    Size = part.Size,
-                    Transparency = part.Transparency,
-                    LocalTransparencyModifier = part.LocalTransparencyModifier,
-                    CanCollide = part.CanCollide,
-                }
-            end
-        y = g:CreateDropdown("Sound", hitsoundNames, "Skeet.cc", function(val)
-            part.CanCollide = false
-            part.Transparency = 1
-            part.LocalTransparencyModifier = 1
-            if part.Size ~= expandedSize then
-                part.Size = expandedSize
+        y = g:CreateToggle("Kill All", false, function(state)
+            SetKillAll(state)
+        end, y)
+
+        y = g:CreateSection("Hitsounds", y + 10)
+        y = g:CreateToggle("Enabled", Combat.Config.HitsoundsEnabled, function(state)
+            Combat.Config.HitsoundsEnabled = state
+        end, y)
+        local hitsoundNames = {"None", "Skeet.cc", "Neverlose", "Baimware", "Old Fatality", "Rust", "Bell", "TF2", "Among Us", "Fortnite Headshot", "Minecraft", "Osu", "TF2 Critical", "Bat", "Call of Duty", "Bruh", "Crowbar", "Weeb", "Steve"}
+        y = g:CreateDropdown("Sound", hitsoundNames, Combat.Config.Hitsound, function(val)
+            Combat.Config.Hitsound = val
+        end, y)
+        y = g:CreateSlider("Volume", 0, 10, Combat.Config.HitsoundVolume, function(val)
+            Combat.Config.HitsoundVolume = val
+        end, y)
 
         g.Content = originalContent
     end)
     return self
-    task.spawn(function()
-        while true do
-            if Combat.Config.HitboxEnabled then
-                ApplySimpleHitboxExpander()
-            else
-                RestoreHitboxes()
-            end
-            task.wait(1)
+end
+
+return Combat
