@@ -157,7 +157,7 @@ local function SyncSilentAimState()
     getgenv().__SilentAimConfig.TeamCheck = Combat.Config.TeamCheck
     getgenv().__SilentAimConfig.BodyHitEnabled = Combat.Config.BodyHitEnabled
     getgenv().__SilentAimConfig.BodyHitChance = Combat.Config.BodyHitChance
-    getgenv().__SilentAimConfig.HitPart = "HeadHB"
+    getgenv().__SilentAimConfig.HitPart = Combat.Config.SilentAimHitPart
     getgenv().__SilentAimConfig.Prediction = Combat.Config.SilentAimPrediction
     getgenv().__SilentAimConfig.TargetPlayer = targetPlr
     getgenv().__SilentAimConfig.TargetPart = targetPart
@@ -246,8 +246,9 @@ end
 local function GetSilentAimHitPart(char)
     if not char then return nil end
 
-    local headPart = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head")
     local torsoParts = {"UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}
+    local headParts = {"HeadHB", "Head"}
+    local preferred = Combat.Config.SilentAimHitPart or "HeadHB"
 
     if Combat.Config.BodyHitEnabled then
         local chance = tonumber(Combat.Config.BodyHitChance) or 0
@@ -261,8 +262,29 @@ local function GetSilentAimHitPart(char)
         end
     end
 
-    if headPart and headPart:IsA("BasePart") then
-        return headPart
+    local preferredNames = {preferred}
+    if preferred == "Head" then
+        preferredNames = {"HeadHB", "Head"}
+    elseif preferred == "HeadHB" then
+        preferredNames = {"HeadHB", "Head"}
+    elseif preferred == "UpperTorso" or preferred == "Torso" or preferred == "LowerTorso" or preferred == "HumanoidRootPart" then
+        preferredNames = {preferred, "UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}
+    else
+        preferredNames = {preferred, "HeadHB", "Head"}
+    end
+
+    for _, partName in ipairs(preferredNames) do
+        local part = char:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            return part
+        end
+    end
+
+    for _, partName in ipairs(headParts) do
+        local part = char:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            return part
+        end
     end
 
     for _, partName in ipairs(torsoParts) do
@@ -347,11 +369,12 @@ local function ExpandHitboxes()
     local crosshairOffset = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
     local expandSize = math.clamp(Combat.Config.HitboxSize + (crosshairOffset * 0.65), Combat.Config.HitboxSize, 40)
 
-    local partsToExpand = {
-        "HeadHB", "Head", "UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart",
-        "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg",
-        "Left Arm", "Right Arm"
-    }
+    local partsToExpand = {}
+    if string.lower(tostring(targetPart.Name)) == "headhb" or string.lower(tostring(targetPart.Name)) == "head" then
+        partsToExpand = {"HeadHB", "Head"}
+    else
+        partsToExpand = {"UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}
+    end
 
     RestoreHitboxes()
 
@@ -666,7 +689,7 @@ function Combat:Init(Gui)
             Combat.Config.SilentAimFOV = val
             UpdateFOVCircle()
         end, y)
-        y = g:CreateDropdown("Hit Part", {"Head", "HumanoidRootPart"}, Combat.Config.SilentAimHitPart, function(val)
+        y = g:CreateDropdown("Hit Part", {"HeadHB", "Head", "UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}, Combat.Config.SilentAimHitPart, function(val)
             Combat.Config.SilentAimHitPart = val
         end, y)
         y = g:CreateToggle("Prediction", Combat.Config.SilentAimPrediction, function(state)
