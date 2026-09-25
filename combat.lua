@@ -93,6 +93,8 @@ end
 local IsAiming = false
 local GetSilentAimHitPart
 local GetTargetPlayerForHitbox
+local CurrentSilentTargetPlr = nil
+local CurrentSilentTargetPart = nil
 
 local function IsValidTarget(plr)
     if plr == LocalPlayer then return false end
@@ -137,19 +139,16 @@ local function GetClosestEnemy()
     return closestTarget
 end
 
-local function GetSilentAimTarget()
-    if not Combat.Config.SilentAimEnabled then return nil, nil end
-    return GetTargetPlayerForHitbox(Combat.Config.SilentAimWallCheck)
-end
-
---// Silent Aim: resolves the current target and applies it to the shared config for any external weapon script to read.
+--// Fake Silent Aim: standalone picker using the non-freezing hitbox target logic
 local function SyncSilentAimState()
     getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
 
     local targetPlr, targetPart = nil, nil
     if Combat.Config.SilentAimEnabled then
-        targetPlr, targetPart = GetSilentAimTarget()
+        targetPlr, targetPart = GetTargetPlayerForHitbox(Combat.Config.SilentAimWallCheck)
     end
+    CurrentSilentTargetPlr = targetPlr
+    CurrentSilentTargetPart = targetPart
 
     getgenv().__SilentAimConfig.Enabled = Combat.Config.SilentAimEnabled
     getgenv().__SilentAimConfig.FOV = Combat.Config.SilentAimFOV
@@ -161,10 +160,6 @@ local function SyncSilentAimState()
     getgenv().__SilentAimConfig.Prediction = Combat.Config.SilentAimPrediction
     getgenv().__SilentAimConfig.TargetPlayer = targetPlr
     getgenv().__SilentAimConfig.TargetPart = targetPart
-    getgenv().__SilentAimConfig.TargetPosition = targetPart and targetPart.Position or nil
-    getgenv().__SilentAimConfig.LastUpdated = os.clock()
-
-    return targetPlr, targetPart
 end
 
 local function StartSilentAim()
@@ -174,11 +169,146 @@ end
 
 local function StopSilentAim()
     Combat.Config.SilentAimEnabled = false
+    CurrentSilentTargetPlr = nil
+    CurrentSilentTargetPart = nil
     getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
     getgenv().__SilentAimConfig.Enabled = false
     getgenv().__SilentAimConfig.TargetPlayer = nil
     getgenv().__SilentAimConfig.TargetPart = nil
 end
+
+--// Dynamic hitbox expansion (silent aim driven)
+--// Expands ONLY the current silent aim target, ONLY while inside the FOV
+--// circle. Size scales with crosshair proximity — dead center = max size,
+--// FOV edge = original size. Anything that stops being the target (or
+--// becomes invalid) is restored to its original part properties.
+local SilentAimOriginalData = {}
+local SilentAimExpandedNow = {}
+
+local function SilentAimRestorePart(part)
+    local data = SilentAimOriginalData[part]
+    if not data then return end
+    if part and part.Parent then
+        part.Size = data.Size
+        part.Transparency = data.Transparency
+        if data.LocalTransparencyModifier ~= nil then
+            part.LocalTransparencyModifier = data.LocalTransparencyModifier
+        end
+        if data.CanCollide ~= nil then
+            part.CanCollide = data.CanCollide
+        end
+    end
+    SilentAimOriginalData[part] = nil
+    SilentAimExpandedNow[part] = nil
+end
+
+local function SilentAimRestoreAll()
+    for part, _ in pairs(SilentAimOriginalData) do
+        SilentAimRestorePart(part)
+    end
+    SilentAimOriginalData = {}
+    SilentAimExpandedNow = {}
+end
+
+local function GetSilentAimDynamicParts(char)
+    if not char then return {} end
+    local mode = tostring(Combat.Config.HitboxPartMode or "Body")
+    if mode:lower() == "headhb" then
+        local head = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head")
+        return head and {head} or {}
+    end
+    return {
+        char:FindFirstChild("RightUpperLeg"),
+        char:FindFirstChild("LeftUpperLeg"),
+        char:FindFirstChild("HumanoidRootPart"),
+    }
+end
+
+local function ApplyDynamicSilentAimExpansion()
+    if not Combat.Config.SilentAimEnabled then
+        if next(SilentAimOriginalData) then
+            SilentAimRestoreAll()
+        end
+        return
+    end
+
+    local plr = CurrentSilentTargetPlr
+    local part = CurrentSilentTargetPart
+    local desired = {}
+
+    -- Only expand if the target is still valid and inside the FOV circle
+    if plr and part and part.Parent and IsValidTarget(plr) then
+        local centerPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+        if onScreen then
+            local dist = (Vector2.new(screenPos.X, screenPos.Y) - centerPos).Magnitude
+            local radius = GetProjectedHitboxRadius(part)
+            if dist <= Combat.Config.SilentAimFOV + radius then
+                local proximity = 1 - math.clamp(dist / Combat.Config.SilentAimFOV, 0, 1)
+                for _, p in ipairs(GetSilentAimDynamicParts(plr.Character)) do
+                    if p and p:IsA("BasePart") then
+                        desired[p] = proximity
+                    end
+                end
+            end
+        end
+    end
+
+    -- Restore anything that is no longer the target
+    for p, _ in pairs(SilentAimExpandedNow) do
+        if not desired[p] then
+            SilentAimRestorePart(p)
+        end
+    end
+
+    -- Apply proximity-scaled sizes
+    local mode = tostring(Combat.Config.HitboxPartMode or "Body")
+    local maxSize = (mode:lower() == "headhb")
+        and Combat.Config.HeadHBSize
+        or Combat.Config.HitboxSize
+
+    for p, proximity in pairs(desired) do
+        if not SilentAimOriginalData[p] then
+            SilentAimOriginalData[p] = {
+                Size = p.Size,
+                Transparency = p.Transparency,
+                LocalTransparencyModifier = p.LocalTransparencyModifier,
+                CanCollide = p.CanCollide,
+            }
+        end
+        local orig = SilentAimOriginalData[p].Size
+        p.Size = Vector3.new(
+            orig.X + (maxSize - orig.X) * proximity,
+            orig.Y + (maxSize - orig.Y) * proximity,
+            orig.Z + (maxSize - orig.Z) * proximity
+        )
+        p.Transparency = 1
+        p.LocalTransparencyModifier = 1
+        p.CanCollide = false
+        SilentAimExpandedNow[p] = true
+    end
+end
+
+task.spawn(function()
+    while true do
+        ApplyDynamicSilentAimExpansion()
+        task.wait(0.1)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+    if plr.Character then
+        for _, p in ipairs(plr.Character:GetDescendants()) do
+            if SilentAimOriginalData[p] then
+                SilentAimRestorePart(p)
+            end
+        end
+    end
+    if plr == CurrentSilentTargetPlr then
+        CurrentSilentTargetPlr = nil
+        CurrentSilentTargetPart = nil
+    end
+end)
 
 --// Input handlers
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -207,8 +337,7 @@ end)
 --// Main render loop
 RunService.RenderStepped:Connect(function()
     UpdateFOVCircle()
-
-    local silentTargetPlr, silentTargetPart = SyncSilentAimState()
+    SyncSilentAimState()
 
     local shouldAim = false
     if Combat.Config.AimbotEnabled then
@@ -228,10 +357,6 @@ RunService.RenderStepped:Connect(function()
                 Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPart.Position)
             end
         end
-    elseif Combat.Config.SilentAimEnabled and silentTargetPart then
-        local silentTargetPos = silentTargetPart.Position
-        local aimLook = CFrame.lookAt(Camera.CFrame.Position, silentTargetPos)
-        Camera.CFrame = aimLook
     end
 
 end)
@@ -381,15 +506,13 @@ local function GetExpanderParts(char)
     local mode = NormalizeHitboxPartMode(Combat.Config.HitboxPartMode)
     if mode == "HeadHB" then
         local headHitbox = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head")
-        if headHitbox and headHitbox:IsA("BasePart") then
-            return {headHitbox}
-        end
-        return {}
+        return headHitbox and {headHitbox} or {}
     end
 
     return {
         char:FindFirstChild("RightUpperLeg"),
         char:FindFirstChild("LeftUpperLeg"),
+        char:FindFirstChild("HumanoidRootPart"),
     }
 end
 
@@ -425,8 +548,10 @@ local function ApplySimpleHitboxExpander()
     end
 
     local mode = NormalizeHitboxPartMode(Combat.Config.HitboxPartMode)
-    local hitboxSize = mode == "HeadHB" and Combat.Config.HeadHBSize or Combat.Config.HitboxSize
-    local expandedSize = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
+    local size = mode == "HeadHB"
+        and Combat.Config.HeadHBSize
+        or Combat.Config.HitboxSize
+    local expandedSize = Vector3.new(size, size, size)
 
     for part in pairs(desiredParts) do
         if not OriginalData[part] then
@@ -438,17 +563,19 @@ local function ApplySimpleHitboxExpander()
             }
         end
 
-        part.Transparency = 1
-        part.LocalTransparencyModifier = 1
-
         if mode == "HeadHB" then
-            part.CanCollide = false
+            part.Transparency = 1
+            part.LocalTransparencyModifier = 1
+            if part.Size ~= expandedSize then
+                part.Size = expandedSize
+            end
         else
             part.CanCollide = false
-        end
-
-        if part.Size ~= expandedSize then
-            part.Size = expandedSize
+            part.Transparency = 1
+            part.LocalTransparencyModifier = 1
+            if part.Size ~= expandedSize then
+                part.Size = expandedSize
+            end
         end
     end
 end
