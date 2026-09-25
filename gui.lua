@@ -10,18 +10,18 @@ local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 --// Colors
-local BLACK      = Color3.fromRGB(12, 12, 12)
-local BACKGROUND = Color3.fromRGB(22, 22, 22)
-local DARK_PANEL = Color3.fromRGB(34, 34, 34)
-local RED        = Color3.fromRGB(130, 130, 130)
-local RED_BRIGHT = Color3.fromRGB(175, 175, 175)
-local RED_DARK   = Color3.fromRGB(92, 92, 92)
-local SELECTED   = Color3.fromRGB(58, 58, 58)
-local HOVER      = Color3.fromRGB(40, 40, 40)
+local BLACK      = Color3.fromRGB(9, 9, 9)
+local BACKGROUND = Color3.fromRGB(18, 18, 18)
+local DARK_PANEL = Color3.fromRGB(14, 14, 14)
+local RED        = Color3.fromRGB(145, 20, 25)
+local RED_BRIGHT = Color3.fromRGB(195, 28, 35)
+local RED_DARK   = Color3.fromRGB(65, 25, 27)
+local SELECTED   = Color3.fromRGB(45, 15, 17)
+local HOVER      = Color3.fromRGB(18, 7, 8)
 local WHITE      = Color3.fromRGB(255, 255, 255)
-local LIGHT      = Color3.fromRGB(232, 232, 232)
-local GRAY       = Color3.fromRGB(160, 160, 160)
-local BORDER     = Color3.fromRGB(100, 100, 100)
+local LIGHT      = Color3.fromRGB(225, 225, 225)
+local GRAY       = Color3.fromRGB(150, 150, 150)
+local BORDER     = Color3.fromRGB(65, 25, 27)
 
 --// Wave Config
 local WAVE_COLOR        = Color3.fromRGB(210, 210, 210)
@@ -87,17 +87,9 @@ Gui.ToggleStates = {}
 local function ApplySelectedGradient(button, enabled)
     if not button then return end
     local gradient = button:FindFirstChild("SelectedGradient")
-    if not gradient then
-        gradient = Instance.new("UIGradient")
-        gradient.Name = "SelectedGradient"
-        gradient.Rotation = 90
-        gradient.Color = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(78, 78, 78)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(48, 48, 48))
-        })
-        gradient.Parent = button
+    if gradient then
+        gradient.Enabled = false
     end
-    gradient.Enabled = enabled
 end
 
 --// NEW: Get toggle state
@@ -633,7 +625,7 @@ function Gui:CreateSection(text, y)
     local Divider = Instance.new("Frame")
     Divider.Size = UDim2.new(1, 0, 0, 1)
     Divider.Position = UDim2.fromOffset(0, y + 28)
-    Divider.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    Divider.BackgroundColor3 = Color3.fromRGB(65, 25, 27)
     Divider.BorderSizePixel = 0
     Divider.ZIndex = 3
     Divider.Parent = self.Content
@@ -896,7 +888,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
         OptBtn.Parent = PopupScroll
 
         OptBtn.MouseEnter:Connect(function()
-            OptBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+            OptBtn.BackgroundColor3 = Color3.fromRGB(40, 22, 24)
         end)
         OptBtn.MouseLeave:Connect(function()
             OptBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
@@ -972,7 +964,7 @@ function Gui:CreateButton(label, callback, y)
     BtnStroke.Parent = Btn
 
     Btn.MouseEnter:Connect(function()
-        Btn.BackgroundColor3 = Color3.fromRGB(28, 28, 28)
+        Btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
         BtnStroke.Color = RED
     end)
     Btn.MouseLeave:Connect(function()

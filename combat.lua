@@ -354,45 +354,150 @@ end)
 --// Hitbox Expander
 local OriginalData = {}
 
-local function ExpandHitboxes()
-    if not Combat.Config.HitboxEnabled then return end
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LocalPlayer then continue end
-        if Combat.Config.TeamCheck and plr.Team == LocalPlayer.Team then continue end
-        local char = plr.Character
-        if not char then continue end
-        local partsToExpand = {"RightUpperLeg", "LeftUpperLeg", "HeadHB", "HumanoidRootPart"}
-        for _, partName in ipairs(partsToExpand) do
-            local part = char:FindFirstChild(partName)
-            if part and part:IsA("BasePart") then
-                if not OriginalData[part] then
-                    OriginalData[part] = {Size = part.Size, Transparency = part.Transparency}
-                end
-                local targetSize = (partName == "HeadHB") and
-                    Vector3.new(Combat.Config.HeadHBSize, Combat.Config.HeadHBSize, Combat.Config.HeadHBSize) or
-                    Vector3.new(Combat.Config.HitboxSize, Combat.Config.HitboxSize, Combat.Config.HitboxSize)
-                part.Size = targetSize
-                part.Transparency = 1
-            end
-        end
-    end
-end
-
 local function RestoreHitboxes()
     for part, data in pairs(OriginalData) do
         if part and part.Parent then
             part.Size = data.Size
             part.Transparency = data.Transparency
+            if data.CanCollide ~= nil then
+                part.CanCollide = data.CanCollide
+            end
         end
     end
     OriginalData = {}
 end
 
+local function GetSilentAimHitPart(char)
+    if not char then return nil end
+
+    local preferred = char:FindFirstChild(Combat.Config.SilentAimHitPart)
+    if preferred then
+        if Combat.Config.BodyHitEnabled and math.random(1, 100) <= Combat.Config.BodyHitChance then
+            local bodyParts = {"UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"}
+            for _, partName in ipairs(bodyParts) do
+                local bodyPart = char:FindFirstChild(partName)
+                if bodyPart then
+                    return bodyPart
+                end
+            end
+        end
+        return preferred
+    end
+
+    if Combat.Config.BodyHitEnabled and math.random(1, 100) <= Combat.Config.BodyHitChance then
+        local bodyParts = {"UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"}
+        for _, partName in ipairs(bodyParts) do
+            local bodyPart = char:FindFirstChild(partName)
+            if bodyPart then
+                return bodyPart
+            end
+        end
+    end
+
+    return char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function GetTargetPlayerForHitbox()
+    local mousePos = UserInputService:GetMouseLocation()
+    local bestPlr = nil
+    local bestDist = math.huge
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr == LocalPlayer then continue end
+        if Combat.Config.TeamCheck and plr.Team == LocalPlayer.Team then continue end
+
+        local char = plr.Character
+        if not char then continue end
+
+        local hitPart = GetSilentAimHitPart(char)
+        if not hitPart then continue end
+
+        if Combat.Config.WallCheck then
+            local origin = Camera.CFrame.Position
+            local direction = hitPart.Position - origin
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances = {LocalPlayer.Character, char}
+            params.IgnoreWater = true
+            local result = Workspace:Raycast(origin, direction, params)
+            if result and not result.Instance:IsDescendantOf(char) then
+                continue
+            end
+        end
+
+        local screenPos, onScreen = Camera:WorldToViewportPoint(hitPart.Position)
+        if not onScreen then continue end
+
+        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+        if dist < bestDist then
+            bestDist = dist
+            bestPlr = plr
+        end
+    end
+
+    return bestPlr
+end
+
+local function ExpandHitboxes()
+    if not Combat.Config.HitboxEnabled and not Combat.Config.SilentAimEnabled then
+        RestoreHitboxes()
+        return
+    end
+
+    Combat.Config.WallCheck = true
+
+    local targetPlr = GetTargetPlayerForHitbox()
+    if not targetPlr or not targetPlr.Character then
+        RestoreHitboxes()
+        return
+    end
+
+    local char = targetPlr.Character
+    local targetPart = GetSilentAimHitPart(char)
+    if not targetPart then
+        RestoreHitboxes()
+        return
+    end
+
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+    if not onScreen then
+        RestoreHitboxes()
+        return
+    end
+
+    local crosshairOffset = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+    local expandSize = math.clamp(Combat.Config.HitboxSize + (crosshairOffset * 0.65), Combat.Config.HitboxSize, 40)
+
+    local partsToExpand = {
+        "Head", "HeadHB", "UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart",
+        "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg",
+        "Left Arm", "Right Arm"
+    }
+
+    RestoreHitboxes()
+
+    for _, partName in ipairs(partsToExpand) do
+        local part = char:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            OriginalData[part] = {
+                Size = part.Size,
+                Transparency = part.Transparency,
+                CanCollide = part.CanCollide,
+            }
+            part.Size = Vector3.new(expandSize, expandSize, expandSize)
+            part.Transparency = 1
+            part.CanCollide = false
+        end
+    end
+end
+
 RunService.RenderStepped:Connect(function()
-    if Combat.Config.HitboxEnabled then
+    if Combat.Config.HitboxEnabled or Combat.Config.SilentAimEnabled then
         ExpandHitboxes()
     else
         RestoreHitboxes()
+        Combat.Config.WallCheck = false
     end
 end)
 
