@@ -1,14 +1,37 @@
-local BASE = "https://raw.githubusercontent.com/confessess/AR097125409721047210947/main/main.lua"
+local BASE = "https://raw.githubusercontent.com/confessess/88888asnd09an7ds0a897nwd0a8d7a208d7a2809d7aw98d79n8sa7nw982d7san98d7/main/"
 
-local GuiModule = loadstring(game:HttpGet(BASE .. "gui.lua"))()
-local CombatModule = loadstring(game:HttpGet(BASE .. "combat.lua"))()
-local ESPModule = loadstring(game:HttpGet(BASE .. "esp.lua"))()
-local GunModsModule = loadstring(game:HttpGet(BASE .. "gunmods.lua"))()
-local MovementModule = loadstring(game:HttpGet(BASE .. "movement.lua"))()
-local WorldModule = loadstring(game:HttpGet(BASE .. "world.lua"))()
-local SkinChangerModule = loadstring(game:HttpGet(BASE .. "skinchanger.lua"))()
+local function LoadModule(fileName)
+    local url = BASE .. fileName
+    local ok, result = pcall(function()
+        return loadstring(game:HttpGet(url))()
+    end)
+
+    if not ok or result == nil then
+        warn("[ENI] Failed to load module: " .. fileName)
+        return nil
+    end
+
+    return result
+end
+
+local GuiModule = LoadModule("gui.lua")
+if not GuiModule or type(GuiModule.Init) ~= "function" then
+    warn("[ENI] gui.lua did not return a valid module. Aborting hub init.")
+    return
+end
+
+local CombatModule = LoadModule("combat.lua")
+local ESPModule = LoadModule("esp.lua")
+local GunModsModule = LoadModule("gunmods.lua")
+local MovementModule = LoadModule("movement.lua")
+local WorldModule = LoadModule("world.lua")
+local SkinChangerModule = LoadModule("skinchanger.lua")
 
 local Gui = GuiModule:Init()
+if not Gui or type(Gui.CreateTab) ~= "function" then
+    warn("[ENI] GUI failed to initialize. Aborting hub init.")
+    return
+end
 
 Gui:CreateTab("Combat", "Aimbot, silent aim, hitbox, kill all.")
 Gui:CreateTab("Visuals", "ESP and world rendering.")
@@ -18,12 +41,24 @@ Gui:CreateTab("Skin Changer", "Announcers, arms, and melee skins.")
 Gui:CreateTab("World", "World modifications.")
 Gui:CreateTab("Settings", "GUI preferences, keybinds, configs.")
 
-CombatModule:Init(Gui)
-ESPModule:Init(Gui)
-GunModsModule:Init(Gui)
-MovementModule:Init(Gui)
-WorldModule:Init(Gui)
-SkinChangerModule:Init(Gui)
+if CombatModule and type(CombatModule.Init) == "function" then
+    CombatModule:Init(Gui)
+end
+if ESPModule and type(ESPModule.Init) == "function" then
+    ESPModule:Init(Gui)
+end
+if GunModsModule and type(GunModsModule.Init) == "function" then
+    GunModsModule:Init(Gui)
+end
+if MovementModule and type(MovementModule.Init) == "function" then
+    MovementModule:Init(Gui)
+end
+if WorldModule and type(WorldModule.Init) == "function" then
+    WorldModule:Init(Gui)
+end
+if SkinChangerModule and type(SkinChangerModule.Init) == "function" then
+    SkinChangerModule:Init(Gui)
+end
 
 --// CONFIG SYSTEM — automatic save/load
 local CONFIG_PATH = "blackout_config.json"

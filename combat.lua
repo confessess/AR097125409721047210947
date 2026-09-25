@@ -148,12 +148,25 @@ local function SyncSilentAimState()
     getgenv().__SilentAimConfig.Enabled = Combat.Config.SilentAimEnabled
     getgenv().__SilentAimConfig.FOV = Combat.Config.SilentAimFOV
     getgenv().__SilentAimConfig.TeamCheck = Combat.Config.TeamCheck
-    getgenv().__SilentAimConfig.BodyHitEnabled = false
-    getgenv().__SilentAimConfig.BodyHitChance = 0
+    getgenv().__SilentAimConfig.BodyHitEnabled = Combat.Config.BodyHitEnabled
+    getgenv().__SilentAimConfig.BodyHitChance = Combat.Config.BodyHitChance
     getgenv().__SilentAimConfig.HitPart = "HeadHB"
     getgenv().__SilentAimConfig.Prediction = Combat.Config.SilentAimPrediction
     getgenv().__SilentAimConfig.TargetPlayer = targetPlr
     getgenv().__SilentAimConfig.TargetPart = targetPart
+end
+
+local function StartSilentAim()
+    Combat.Config.SilentAimEnabled = true
+    SyncSilentAimState()
+end
+
+local function StopSilentAim()
+    Combat.Config.SilentAimEnabled = false
+    getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
+    getgenv().__SilentAimConfig.Enabled = false
+    getgenv().__SilentAimConfig.TargetPlayer = nil
+    getgenv().__SilentAimConfig.TargetPart = nil
 end
 
 --// Input handlers
