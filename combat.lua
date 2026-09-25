@@ -262,25 +262,7 @@ local function GetSilentAimHitPart(char)
         end
     end
 
-    local preferredNames = {preferred}
-    if preferred == "Head" then
-        preferredNames = {"HeadHB", "Head"}
-    elseif preferred == "HeadHB" then
-        preferredNames = {"HeadHB", "Head"}
-    elseif preferred == "UpperTorso" or preferred == "Torso" or preferred == "LowerTorso" or preferred == "HumanoidRootPart" then
-        preferredNames = {preferred, "UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}
-    else
-        preferredNames = {preferred, "HeadHB", "Head"}
-    end
-
-    for _, partName in ipairs(preferredNames) do
-        local part = char:FindFirstChild(partName)
-        if part and part:IsA("BasePart") then
-            return part
-        end
-    end
-
-    for _, partName in ipairs(headParts) do
+    for _, partName in ipairs({preferred, "HeadHB", "Head"}) do
         local part = char:FindFirstChild(partName)
         if part and part:IsA("BasePart") then
             return part
@@ -288,6 +270,13 @@ local function GetSilentAimHitPart(char)
     end
 
     for _, partName in ipairs(torsoParts) do
+        local part = char:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            return part
+        end
+    end
+
+    for _, partName in ipairs(headParts) do
         local part = char:FindFirstChild(partName)
         if part and part:IsA("BasePart") then
             return part
@@ -370,7 +359,8 @@ local function ExpandHitboxes()
     local expandSize = math.clamp(Combat.Config.HitboxSize + (crosshairOffset * 0.65), Combat.Config.HitboxSize, 40)
 
     local partsToExpand = {}
-    if string.lower(tostring(targetPart.Name)) == "headhb" or string.lower(tostring(targetPart.Name)) == "head" then
+    local targetName = string.lower(tostring(targetPart.Name))
+    if targetName == "headhb" or targetName == "head" then
         partsToExpand = {"HeadHB", "Head"}
     else
         partsToExpand = {"UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}
