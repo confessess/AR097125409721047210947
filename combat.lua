@@ -286,15 +286,6 @@ local function GetSilentAimHitPart(char)
     return nil
 end
 
-local function GetTargetPartFamilyForExpansion(targetPart)
-    if not targetPart then return {} end
-    local targetName = string.lower(tostring(targetPart.Name))
-    if targetName == "headhb" or targetName == "head" then
-        return {"HeadHB", "Head"}
-    end
-    return {"UpperTorso", "Torso", "LowerTorso"}
-end
-
 local function GetTargetPlayerForHitbox(wallCheckEnabled)
     local mousePos = UserInputService:GetMouseLocation()
     local bestPlr = nil
@@ -341,65 +332,49 @@ local function GetExpanderTargetPlayer()
     return GetTargetPlayerForHitbox(false)
 end
 
-local function ExpandHitboxes()
+local function GetExpanderParts(char)
+    if not char then return {} end
+    return {
+        char:FindFirstChild("HeadHB"),
+        char:FindFirstChild("HumanoidRootPart"),
+        char:FindFirstChild("LeftUpperLeg"),
+        char:FindFirstChild("RightUpperLeg"),
+    }
+end
+
+local function ApplySimpleHitboxExpander()
     if not Combat.Config.HitboxEnabled then
         RestoreHitboxes()
         return
     end
 
-    local targetPlr = GetExpanderTargetPlayer()
-    if not targetPlr or not targetPlr.Character then
-        RestoreHitboxes()
-        return
-    end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr == LocalPlayer or not IsValidTarget(plr) then continue end
 
-    local char = targetPlr.Character
-    local targetPart = GetSilentAimHitPart(char)
-    if not targetPart then
-        RestoreHitboxes()
-        return
-    end
+        local char = plr.Character
+        if not char then continue end
 
-    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-    if not onScreen then
-        RestoreHitboxes()
-        return
-    end
+        for _, part in ipairs(GetExpanderParts(char)) do
+            if part and part:IsA("BasePart") then
+                if not OriginalData[part] then
+                    OriginalData[part] = {
+                        Size = part.Size,
+                        Transparency = part.Transparency,
+                        CanCollide = part.CanCollide,
+                    }
+                end
 
-    local crosshairOffset = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
-    local expandSize = math.clamp(Combat.Config.HitboxSize + (crosshairOffset * 0.65), Combat.Config.HitboxSize, 40)
-
-    local partsToExpand = GetTargetPartFamilyForExpansion(targetPart)
-    if #partsToExpand == 0 then
-        RestoreHitboxes()
-        return
-    end
-
-    RestoreHitboxes()
-
-    for _, partName in ipairs(partsToExpand) do
-        local part = char:FindFirstChild(partName)
-        if part and part:IsA("BasePart") then
-            OriginalData[part] = {
-                Size = part.Size,
-                Transparency = part.Transparency,
-                CanCollide = part.CanCollide,
-            }
-
-            -- Arsenal-style hitbox expansion: enlarge only the hitbox part family,
-            -- without permanently warping the whole visible character model.
-            local safeSize = Vector3.new(expandSize, expandSize, expandSize)
-            part.Size = safeSize
-            part.Transparency = 1
-            part.CanCollide = false
+                part.CanCollide = false
+                part.Transparency = 10
+                part.Size = Vector3.new(13, 13, 13)
+            end
         end
     end
 end
 
 RunService.RenderStepped:Connect(function()
     if Combat.Config.HitboxEnabled then
-        ExpandHitboxes()
+        ApplySimpleHitboxExpander()
     else
         RestoreHitboxes()
     end
