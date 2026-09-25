@@ -137,13 +137,18 @@ local function GetClosestEnemy()
     return closestTarget
 end
 
---// Fake Silent Aim: standalone picker using the non-freezing hitbox target logic
+local function GetSilentAimTarget()
+    if not Combat.Config.SilentAimEnabled then return nil, nil end
+    return GetTargetPlayerForHitbox(Combat.Config.SilentAimWallCheck)
+end
+
+--// Silent Aim: resolves the current target and applies it to the shared config for any external weapon script to read.
 local function SyncSilentAimState()
     getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
 
     local targetPlr, targetPart = nil, nil
     if Combat.Config.SilentAimEnabled then
-        targetPlr, targetPart = GetTargetPlayerForHitbox(Combat.Config.SilentAimWallCheck)
+        targetPlr, targetPart = GetSilentAimTarget()
     end
 
     getgenv().__SilentAimConfig.Enabled = Combat.Config.SilentAimEnabled
@@ -156,6 +161,10 @@ local function SyncSilentAimState()
     getgenv().__SilentAimConfig.Prediction = Combat.Config.SilentAimPrediction
     getgenv().__SilentAimConfig.TargetPlayer = targetPlr
     getgenv().__SilentAimConfig.TargetPart = targetPart
+    getgenv().__SilentAimConfig.TargetPosition = targetPart and targetPart.Position or nil
+    getgenv().__SilentAimConfig.LastUpdated = os.clock()
+
+    return targetPlr, targetPart
 end
 
 local function StartSilentAim()
@@ -198,7 +207,8 @@ end)
 --// Main render loop
 RunService.RenderStepped:Connect(function()
     UpdateFOVCircle()
-    SyncSilentAimState()
+
+    local silentTargetPlr, silentTargetPart = SyncSilentAimState()
 
     local shouldAim = false
     if Combat.Config.AimbotEnabled then
@@ -218,6 +228,10 @@ RunService.RenderStepped:Connect(function()
                 Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPart.Position)
             end
         end
+    elseif Combat.Config.SilentAimEnabled and silentTargetPart then
+        local silentTargetPos = silentTargetPart.Position
+        local aimLook = CFrame.lookAt(Camera.CFrame.Position, silentTargetPos)
+        Camera.CFrame = aimLook
     end
 
 end)
@@ -367,13 +381,15 @@ local function GetExpanderParts(char)
     local mode = NormalizeHitboxPartMode(Combat.Config.HitboxPartMode)
     if mode == "HeadHB" then
         local headHitbox = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head")
-        return headHitbox and {headHitbox} or {}
+        if headHitbox and headHitbox:IsA("BasePart") then
+            return {headHitbox}
+        end
+        return {}
     end
 
     return {
         char:FindFirstChild("RightUpperLeg"),
         char:FindFirstChild("LeftUpperLeg"),
-        char:FindFirstChild("HumanoidRootPart"),
     }
 end
 
@@ -409,10 +425,8 @@ local function ApplySimpleHitboxExpander()
     end
 
     local mode = NormalizeHitboxPartMode(Combat.Config.HitboxPartMode)
-    local size = mode == "HeadHB"
-        and Combat.Config.HeadHBSize
-        or Combat.Config.HitboxSize
-    local expandedSize = Vector3.new(size, size, size)
+    local hitboxSize = mode == "HeadHB" and Combat.Config.HeadHBSize or Combat.Config.HitboxSize
+    local expandedSize = Vector3.new(hitboxSize, hitboxSize, hitboxSize)
 
     for part in pairs(desiredParts) do
         if not OriginalData[part] then
@@ -424,9 +438,15 @@ local function ApplySimpleHitboxExpander()
             }
         end
 
-        part.CanCollide = false
         part.Transparency = 1
         part.LocalTransparencyModifier = 1
+
+        if mode == "HeadHB" then
+            part.CanCollide = false
+        else
+            part.CanCollide = false
+        end
+
         if part.Size ~= expandedSize then
             part.Size = expandedSize
         end
