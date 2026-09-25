@@ -24,6 +24,7 @@ Combat.Config = {
     SilentAimHitPart = "HeadHB",
     SilentAimPrediction = false,
     HitboxEnabled = false,
+    HitboxPartMode = "Body",
     TeamCheck = true,
     WallCheck = false,
     FOV = 25,
@@ -229,6 +230,9 @@ local function RestoreHitboxes()
         if part and part.Parent then
             part.Size = data.Size
             part.Transparency = data.Transparency
+            if data.LocalTransparencyModifier ~= nil then
+                part.LocalTransparencyModifier = data.LocalTransparencyModifier
+            end
             if data.CanCollide ~= nil then
                 part.CanCollide = data.CanCollide
             end
@@ -288,8 +292,7 @@ GetTargetPlayerForHitbox = function(wallCheckEnabled)
     local fovRadius = Combat.Config.SilentAimFOV
 
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LocalPlayer then continue end
-        if Combat.Config.TeamCheck and plr.Team == LocalPlayer.Team then continue end
+        if not IsValidTarget(plr) then continue end
 
         local char = plr.Character
         if not char then continue end
@@ -330,12 +333,17 @@ end
 
 local function GetExpanderParts(char)
     if not char then return {} end
-    return {
-        char:FindFirstChild("HeadHB"),
-        char:FindFirstChild("HumanoidRootPart"),
-        char:FindFirstChild("LeftUpperLeg"),
-        char:FindFirstChild("RightUpperLeg"),
-    }
+
+    if Combat.Config.HitboxPartMode == "HeadHB" then
+        local headHitbox = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head")
+        return headHitbox and {headHitbox} or {}
+    end
+
+    local bodyPart = char:FindFirstChild("Torso")
+        or char:FindFirstChild("UpperTorso")
+        or char:FindFirstChild("LowerTorso")
+        or char:FindFirstChild("HumanoidRootPart")
+    return bodyPart and {bodyPart} or {}
 end
 
 local function ApplySimpleHitboxExpander()
@@ -351,19 +359,50 @@ local function ApplySimpleHitboxExpander()
     end
 
     local char = targetPlr.Character
-    RestoreHitboxes()
-
-    for _, part in ipairs(GetExpanderParts(char)) do
+    local partsToExpand = GetExpanderParts(char)
+    local desiredParts = {}
+    for _, part in ipairs(partsToExpand) do
         if part and part:IsA("BasePart") then
-            OriginalData[part] = {
-                Size = part.Size,
-                Transparency = part.Transparency,
-                CanCollide = part.CanCollide,
-            }
+            desiredParts[part] = true
+        end
+    end
+
+    for part, data in pairs(OriginalData) do
+        if not desiredParts[part] then
+            if part and part.Parent then
+                part.Size = data.Size
+                part.Transparency = data.Transparency
+                if data.LocalTransparencyModifier ~= nil then
+                    part.LocalTransparencyModifier = data.LocalTransparencyModifier
+                end
+                part.CanCollide = data.CanCollide
+            end
+            OriginalData[part] = nil
+        end
+    end
+
+    local size = Combat.Config.HitboxPartMode == "HeadHB"
+        and Combat.Config.HeadHBSize
+        or Combat.Config.HitboxSize
+    local expandedSize = Vector3.new(size, size, size)
+
+    for _, part in ipairs(partsToExpand) do
+        if part and part:IsA("BasePart") then
+            if not OriginalData[part] then
+                OriginalData[part] = {
+                    Size = part.Size,
+                    Transparency = part.Transparency,
+                    LocalTransparencyModifier = part.LocalTransparencyModifier,
+                    CanCollide = part.CanCollide,
+                }
+            end
 
             part.CanCollide = false
-            part.Transparency = 10
-            part.Size = Vector3.new(13, 13, 13)
+            part.Transparency = 1
+            part.LocalTransparencyModifier = 1
+            if part.Size ~= expandedSize then
+                part.Size = expandedSize
+            end
         end
     end
 end
@@ -687,6 +726,9 @@ function Combat:Init(Gui)
         y = g:CreateToggle("Hitbox Expander", Combat.Config.HitboxEnabled, function(state)
             Combat.Config.HitboxEnabled = state
             if not state then RestoreHitboxes() end
+        end, y)
+        y = g:CreateDropdown("Expand Part", {"Body", "HeadHB"}, Combat.Config.HitboxPartMode, function(val)
+            Combat.Config.HitboxPartMode = val
         end, y)
         y = g:CreateSlider("Body Hitbox Size", 5, 25, Combat.Config.HitboxSize, function(val)
             Combat.Config.HitboxSize = val
