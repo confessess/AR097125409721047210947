@@ -20,13 +20,13 @@ Combat.Config = {
     SilentAimEnabled = false,
     SilentAimFOV = 150,
     SilentAimFOVVisible = true,
-    SilentAimHitPart = "Head",
+    SilentAimHitPart = "HeadHB",
     SilentAimPrediction = false,
     HitboxEnabled = false,
     TeamCheck = true,
     WallCheck = false,
     FOV = 25,
-    HitPart = "Head",
+    HitPart = "HeadHB",
     HitboxSize = 13,
     HeadHBSize = 20,
     AimKey = Enum.UserInputType.MouseButton2,
@@ -119,8 +119,7 @@ local function GetClosestEnemy()
     for _, plr in ipairs(Players:GetPlayers()) do
         if not IsValidTarget(plr) then continue end
         local char = plr.Character
-        local targetPart = char:FindFirstChild(Combat.Config.HitPart)
-        if not targetPart then targetPart = char:FindFirstChild("Head") end
+        local targetPart = GetSilentAimHitPart(char)
         if not targetPart then continue end
         if not IsVisible(targetPart) then continue end
         local pos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
@@ -134,161 +133,27 @@ local function GetClosestEnemy()
     return closestTarget
 end
 
---// ═══════════════════════════════════════════════════════════════
---//  SILENT AIM — Original Z3US method (strict signature)
---// ═══════════════════════════════════════════════════════════════
-local SilentAimRunning = false
+--// Silent Aim (hitbox-driven target selection)
+local function SyncSilentAimState()
+    getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
 
-local function StartSilentAim()
-    if SilentAimRunning then return end
-    SilentAimRunning = true
-
-    local actor = getactors and getactors()[1]
-    if not actor then
-        warn("[ENI] No actor found for silent aim")
-        SilentAimRunning = false
-        return
+    local targetPlr, targetPart = nil, nil
+    if Combat.Config.SilentAimEnabled then
+        targetPlr = GetTargetPlayerForHitbox()
+        if targetPlr and targetPlr.Character then
+            targetPart = GetSilentAimHitPart(targetPlr.Character)
+        end
     end
 
-    run_on_actor(actor, [=[
-        local Players = game:GetService("Players")
-        local RunService = game:GetService("RunService")
-        local Workspace = game:GetService("Workspace")
-        local LocalPlayer = Players.LocalPlayer
-        local Camera = Workspace.CurrentCamera
-        local ReplicatedStorage = game:GetService("ReplicatedStorage")
-
-        getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
-        local config = getgenv().__SilentAimConfig
-        local target = nil
-
-        local function IsValidTarget(plr)
-            if plr == LocalPlayer then return false end
-            if not plr.Character then return false end
-            local char = plr.Character
-            local humanoid = char:FindFirstChildOfClass("Humanoid")
-            if not humanoid or humanoid.Health <= 0 then return false end
-            local spawned = char:FindFirstChild("Spawned")
-            if spawned and not spawned.Value then return false end
-            local status = char:FindFirstChild("Status")
-            if status then
-                local alive = status:FindFirstChild("Alive")
-                if alive and not alive.Value then return false end
-            end
-            if config.TeamCheck ~= false then
-                local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
-                local ffa = wkspc and wkspc:FindFirstChild("FFA")
-                if not (ffa and ffa.Value) then
-                    if plr.Team == LocalPlayer.Team then return false end
-                end
-            end
-            return true
-        end
-
-        local function PredictPosition(part)
-            if not part then return nil end
-            if not config.Prediction then return part.Position end
-            local velocity = part.AssemblyLinearVelocity or Vector3.new()
-            local distance = (part.Position - Camera.CFrame.Position).Magnitude
-            local bulletSpeed = 3000
-            local travelTime = distance / bulletSpeed
-            local ping = LocalPlayer:GetNetworkPing() or 0
-            return part.Position + (velocity * (travelTime + ping * 0.5))
-        end
-
-        local function GetClosestPlayer()
-            local closestDistance = math.huge
-            local closest = nil
-            local viewportCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-            local fov = config.FOV or 150
-            local hitPartName = config.HitPart or "Head"
-
-            for _, v in pairs(Players:GetPlayers()) do
-                if not IsValidTarget(v) then continue end
-                local char = v.Character
-                local targetPart = char:FindFirstChild(hitPartName)
-                if not targetPart then targetPart = char:FindFirstChild("Head") end
-                if not targetPart then continue end
-
-                local origin = Camera.CFrame.Position
-                local direction = targetPart.Position - origin
-                local params = RaycastParams.new()
-                params.FilterType = Enum.RaycastFilterType.Exclude
-                params.FilterDescendantsInstances = {LocalPlayer.Character}
-                params.IgnoreWater = true
-                local result = Workspace:Raycast(origin, direction, params)
-                if result and not result.Instance:IsDescendantOf(char) then continue end
-
-                local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                if not onScreen then continue end
-                local dist = (Vector2.new(screenPos.X, screenPos.Y) - viewportCenter).Magnitude
-                if dist < closestDistance and dist < fov then
-                    closestDistance = dist
-                    closest = targetPart
-                end
-            end
-
-            if closest and closest.Parent and config.BodyHitEnabled then
-                local chance = config.BodyHitChance or 0
-                if math.random(1, 100) <= chance then
-                    local bodyParts = {"UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"}
-                    for _, partName in ipairs(bodyParts) do
-                        local part = closest.Parent:FindFirstChild(partName)
-                        if part then
-                            closest = part
-                            break
-                        end
-                    end
-                end
-            end
-
-            return closest
-        end
-
-        RunService.RenderStepped:Connect(function()
-            if config.Enabled == false then
-                target = nil
-                return
-            end
-            target = GetClosestPlayer()
-        end)
-
-        for i, v in pairs(getgc()) do
-            if type(v) == "function" and islclosure(v) then
-                if debug.info(v, "a") == 2 and #debug.getupvalues(v) == 2 and #debug.getconstants(v) == 17 and debug.info(v, "n"):len() <= 10 then
-                    local old
-                    old = hookfunction(v, function(p1, p2)
-                        if target and target.Position and config.Enabled ~= false then
-                            local mychar = LocalPlayer.Character
-                            if mychar then
-                                local head = mychar:FindFirstChild("Head")
-                                if head then
-                                    local aimPos = target.Position
-                                    if config.Prediction then
-                                        local velocity = target.AssemblyLinearVelocity or Vector3.new()
-                                        local distance = (target.Position - Camera.CFrame.Position).Magnitude
-                                        local bulletSpeed = 3000
-                                        local travelTime = distance / bulletSpeed
-                                        local ping = LocalPlayer:GetNetworkPing() or 0
-                                        aimPos = target.Position + (velocity * (travelTime + ping * 0.5))
-                                    end
-                                    local direction = (aimPos - head.Position)
-                                    p1 = Ray.new(head.Position, direction)
-                                end
-                            end
-                        end
-                        return old(p1, p2)
-                    end)
-                end
-            end
-        end
-    ]=])
-end
-
-local function StopSilentAim()
-    SilentAimRunning = false
-    getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
-    getgenv().__SilentAimConfig.Enabled = false
+    getgenv().__SilentAimConfig.Enabled = Combat.Config.SilentAimEnabled
+    getgenv().__SilentAimConfig.FOV = Combat.Config.SilentAimFOV
+    getgenv().__SilentAimConfig.TeamCheck = Combat.Config.TeamCheck
+    getgenv().__SilentAimConfig.BodyHitEnabled = false
+    getgenv().__SilentAimConfig.BodyHitChance = 0
+    getgenv().__SilentAimConfig.HitPart = "HeadHB"
+    getgenv().__SilentAimConfig.Prediction = Combat.Config.SilentAimPrediction
+    getgenv().__SilentAimConfig.TargetPlayer = targetPlr
+    getgenv().__SilentAimConfig.TargetPart = targetPart
 end
 
 --// Input handlers
@@ -318,16 +183,7 @@ end)
 --// Main render loop
 RunService.RenderStepped:Connect(function()
     UpdateFOVCircle()
-
-    getgenv().__SilentAimConfig = {
-        Enabled = Combat.Config.SilentAimEnabled,
-        FOV = Combat.Config.SilentAimFOV,
-        TeamCheck = Combat.Config.TeamCheck,
-        BodyHitEnabled = Combat.Config.BodyHitEnabled,
-        BodyHitChance = Combat.Config.BodyHitChance,
-        HitPart = Combat.Config.SilentAimHitPart,
-        Prediction = Combat.Config.SilentAimPrediction,
-    }
+    SyncSilentAimState()
 
     local shouldAim = false
     if Combat.Config.AimbotEnabled then
@@ -370,31 +226,33 @@ end
 local function GetSilentAimHitPart(char)
     if not char then return nil end
 
-    local preferred = char:FindFirstChild(Combat.Config.SilentAimHitPart)
-    if preferred then
-        if Combat.Config.BodyHitEnabled and math.random(1, 100) <= Combat.Config.BodyHitChance then
-            local bodyParts = {"UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"}
-            for _, partName in ipairs(bodyParts) do
-                local bodyPart = char:FindFirstChild(partName)
-                if bodyPart then
-                    return bodyPart
+    local headPart = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head")
+    local torsoParts = {"UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}
+
+    if Combat.Config.BodyHitEnabled then
+        local chance = tonumber(Combat.Config.BodyHitChance) or 0
+        if math.random(1, 100) <= chance then
+            for _, partName in ipairs(torsoParts) do
+                local part = char:FindFirstChild(partName)
+                if part and part:IsA("BasePart") then
+                    return part
                 end
             end
         end
-        return preferred
     end
 
-    if Combat.Config.BodyHitEnabled and math.random(1, 100) <= Combat.Config.BodyHitChance then
-        local bodyParts = {"UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"}
-        for _, partName in ipairs(bodyParts) do
-            local bodyPart = char:FindFirstChild(partName)
-            if bodyPart then
-                return bodyPart
-            end
+    if headPart and headPart:IsA("BasePart") then
+        return headPart
+    end
+
+    for _, partName in ipairs(torsoParts) do
+        local part = char:FindFirstChild(partName)
+        if part and part:IsA("BasePart") then
+            return part
         end
     end
 
-    return char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+    return nil
 end
 
 local function GetTargetPlayerForHitbox()
@@ -470,7 +328,7 @@ local function ExpandHitboxes()
     local expandSize = math.clamp(Combat.Config.HitboxSize + (crosshairOffset * 0.65), Combat.Config.HitboxSize, 40)
 
     local partsToExpand = {
-        "Head", "HeadHB", "UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart",
+        "HeadHB", "Head", "UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart",
         "LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg",
         "Left Arm", "Right Arm"
     }
