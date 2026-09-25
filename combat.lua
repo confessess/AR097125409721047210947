@@ -246,7 +246,7 @@ end
 local function GetSilentAimHitPart(char)
     if not char then return nil end
 
-    local torsoParts = {"UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}
+    local torsoParts = {"UpperTorso", "Torso", "LowerTorso"}
     local headParts = {"HeadHB", "Head"}
     local preferred = Combat.Config.SilentAimHitPart or "HeadHB"
 
@@ -290,6 +290,7 @@ local function GetTargetPlayerForHitbox()
     local mousePos = UserInputService:GetMouseLocation()
     local bestPlr = nil
     local bestDist = math.huge
+    local fovRadius = Combat.Config.SilentAimFOV
 
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr == LocalPlayer then continue end
@@ -318,7 +319,7 @@ local function GetTargetPlayerForHitbox()
         if not onScreen then continue end
 
         local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-        if dist < bestDist then
+        if dist <= fovRadius and dist < bestDist then
             bestDist = dist
             bestPlr = plr
         end
@@ -363,7 +364,7 @@ local function ExpandHitboxes()
     if targetName == "headhb" or targetName == "head" then
         partsToExpand = {"HeadHB", "Head"}
     else
-        partsToExpand = {"UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}
+        partsToExpand = {"UpperTorso", "Torso", "LowerTorso"}
     end
 
     RestoreHitboxes()
