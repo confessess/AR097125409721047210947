@@ -25,16 +25,21 @@ ESP.Config = {
 local ESPObjects = {}
 local Highlights = {}
 
+local function HideESP(esp)
+    if not esp then return end
+    esp.Box.Visible = false
+    esp.BoxOutline.Visible = false
+    esp.Name.Visible = false
+    esp.HealthBar.Visible = false
+    esp.HealthBarOutline.Visible = false
+    esp.HealthText.Visible = false
+    esp.Distance.Visible = false
+    esp.Weapon.Visible = false
+end
+
 local function HideAllESP()
     for _, esp in pairs(ESPObjects) do
-        esp.Box.Visible = false
-        esp.BoxOutline.Visible = false
-        esp.Name.Visible = false
-        esp.HealthBar.Visible = false
-        esp.HealthBarOutline.Visible = false
-        esp.HealthText.Visible = false
-        esp.Distance.Visible = false
-        esp.Weapon.Visible = false
+        HideESP(esp)
     end
 end
 
@@ -119,8 +124,14 @@ end
 local function RemoveESP(player)
     local esp = ESPObjects[player]
     if esp then
-        for _, obj in pairs(esp) do
-            if type(obj) == "table" and obj.Remove then obj:Remove() end
+        HideESP(esp)
+        for _, key in ipairs({"Box", "BoxOutline", "Name", "HealthBar", "HealthBarOutline", "HealthText", "Distance", "Weapon"}) do
+            local drawing = esp[key]
+            if drawing then
+                pcall(function()
+                    drawing:Remove()
+                end)
+            end
         end
         ESPObjects[player] = nil
     end
@@ -240,8 +251,9 @@ local function UpdateESP()
 
     for player, hl in pairs(Highlights) do
         local character = player.Character
+        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
         local showChams = false
-        if character and ESP.Config.Chams and ESP.Config.Enabled then
+        if character and humanoid and humanoid.Health > 0 and ESP.Config.Chams and ESP.Config.Enabled then
             if not ESP.Config.TeamCheck or player.Team ~= LocalPlayer.Team then
                 local rootPart = character:FindFirstChild("HumanoidRootPart")
                 if rootPart then

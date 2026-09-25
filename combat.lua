@@ -20,6 +20,7 @@ Combat.Config = {
     SilentAimEnabled = false,
     SilentAimFOV = 150,
     SilentAimFOVVisible = true,
+    SilentAimWallCheck = true,
     SilentAimHitPart = "HeadHB",
     SilentAimPrediction = false,
     HitboxEnabled = false,
@@ -89,6 +90,8 @@ local function IsVisible(targetPart)
 end
 
 local IsAiming = false
+local GetSilentAimHitPart
+local GetTargetPlayerForHitbox
 
 local function IsValidTarget(plr)
     if plr == LocalPlayer then return false end
@@ -137,24 +140,15 @@ end
 local function SyncSilentAimState()
     getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
 
-    if type(GetTargetPlayerForHitbox) ~= "function" or type(GetSilentAimHitPart) ~= "function" then
-        getgenv().__SilentAimConfig.Enabled = false
-        getgenv().__SilentAimConfig.TargetPlayer = nil
-        getgenv().__SilentAimConfig.TargetPart = nil
-        return
-    end
-
     local targetPlr, targetPart = nil, nil
     if Combat.Config.SilentAimEnabled then
-        targetPlr = GetTargetPlayerForHitbox(Combat.Config.WallCheck)
-        if targetPlr and targetPlr.Character then
-            targetPart = GetSilentAimHitPart(targetPlr.Character)
-        end
+        targetPlr, targetPart = GetTargetPlayerForHitbox(Combat.Config.SilentAimWallCheck)
     end
 
     getgenv().__SilentAimConfig.Enabled = Combat.Config.SilentAimEnabled
     getgenv().__SilentAimConfig.FOV = Combat.Config.SilentAimFOV
     getgenv().__SilentAimConfig.TeamCheck = Combat.Config.TeamCheck
+    getgenv().__SilentAimConfig.WallCheck = Combat.Config.SilentAimWallCheck
     getgenv().__SilentAimConfig.BodyHitEnabled = Combat.Config.BodyHitEnabled
     getgenv().__SilentAimConfig.BodyHitChance = Combat.Config.BodyHitChance
     getgenv().__SilentAimConfig.HitPart = Combat.Config.SilentAimHitPart
@@ -243,7 +237,7 @@ local function RestoreHitboxes()
     OriginalData = {}
 end
 
-local function GetSilentAimHitPart(char)
+GetSilentAimHitPart = function(char)
     if not char then return nil end
 
     local torsoParts = {"UpperTorso", "Torso", "LowerTorso"}
@@ -286,9 +280,10 @@ local function GetSilentAimHitPart(char)
     return nil
 end
 
-local function GetTargetPlayerForHitbox(wallCheckEnabled)
+GetTargetPlayerForHitbox = function(wallCheckEnabled)
     local mousePos = UserInputService:GetMouseLocation()
     local bestPlr = nil
+    local bestPart = nil
     local bestDist = math.huge
     local fovRadius = Combat.Config.SilentAimFOV
 
@@ -322,10 +317,11 @@ local function GetTargetPlayerForHitbox(wallCheckEnabled)
         if dist <= fovRadius and dist < bestDist then
             bestDist = dist
             bestPlr = plr
+            bestPart = hitPart
         end
     end
 
-    return bestPlr
+    return bestPlr, bestPart
 end
 
 local function GetExpanderTargetPlayer()
@@ -348,26 +344,26 @@ local function ApplySimpleHitboxExpander()
         return
     end
 
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LocalPlayer or not IsValidTarget(plr) then continue end
+    local targetPlr = GetExpanderTargetPlayer()
+    if not targetPlr or not targetPlr.Character then
+        RestoreHitboxes()
+        return
+    end
 
-        local char = plr.Character
-        if not char then continue end
+    local char = targetPlr.Character
+    RestoreHitboxes()
 
-        for _, part in ipairs(GetExpanderParts(char)) do
-            if part and part:IsA("BasePart") then
-                if not OriginalData[part] then
-                    OriginalData[part] = {
-                        Size = part.Size,
-                        Transparency = part.Transparency,
-                        CanCollide = part.CanCollide,
-                    }
-                end
+    for _, part in ipairs(GetExpanderParts(char)) do
+        if part and part:IsA("BasePart") then
+            OriginalData[part] = {
+                Size = part.Size,
+                Transparency = part.Transparency,
+                CanCollide = part.CanCollide,
+            }
 
-                part.CanCollide = false
-                part.Transparency = 10
-                part.Size = Vector3.new(13, 13, 13)
-            end
+            part.CanCollide = false
+            part.Transparency = 10
+            part.Size = Vector3.new(13, 13, 13)
         end
     end
 end
@@ -662,6 +658,9 @@ function Combat:Init(Gui)
                 StopSilentAim()
             end
             UpdateFOVCircle()
+        end, y)
+        y = g:CreateToggle("Silent Aim Wall Check", Combat.Config.SilentAimWallCheck, function(state)
+            Combat.Config.SilentAimWallCheck = state
         end, y)
         y = g:CreateSlider("Silent Aim FOV", 50, 500, Combat.Config.SilentAimFOV, function(val)
             Combat.Config.SilentAimFOV = val

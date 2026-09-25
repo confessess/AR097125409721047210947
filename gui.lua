@@ -227,7 +227,7 @@ function Gui:Init()
     Title.Size = UDim2.new(1, -140, 0, 26)
     Title.Position = UDim2.fromOffset(22, 10)
     Title.BackgroundTransparency = 1
-    Title.Text = "Blackout.cc"
+    Title.Text = "Light hub"
     Title.TextColor3 = WHITE
     Title.TextSize = 20
     Title.Font = Enum.Font.GothamBold
@@ -239,7 +239,7 @@ function Gui:Init()
     Subtitle.Size = UDim2.new(1, -140, 0, 18)
     Subtitle.Position = UDim2.fromOffset(23, 36)
     Subtitle.BackgroundTransparency = 1
-    Subtitle.Text = "Made by confess & soph .gg/feuds"
+    Subtitle.Text = "discord.gg/feuds"
     Subtitle.TextColor3 = GRAY
     Subtitle.TextSize = 11
     Subtitle.Font = Enum.Font.Gotham
