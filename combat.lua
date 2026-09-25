@@ -284,11 +284,26 @@ GetSilentAimHitPart = function(char)
     return nil
 end
 
+local function GetProjectedHitboxRadius(part)
+    if not part or not part:IsA("BasePart") then return 0 end
+
+    local size = part.Size
+    local radiusWorld = math.max(size.X, size.Y, size.Z) * 0.5
+    local cameraPos = Camera.CFrame.Position
+    local distance = (part.Position - cameraPos).Magnitude
+    if distance <= 0.0001 then return 0 end
+
+    local fovRadians = math.rad(Camera.FieldOfView)
+    local worldHeight = 2 * math.tan(fovRadians / 2) * distance
+    local viewportScale = Camera.ViewportSize.Y / worldHeight
+    return radiusWorld * viewportScale
+end
+
 GetTargetPlayerForHitbox = function(wallCheckEnabled)
-    local mousePos = UserInputService:GetMouseLocation()
+    local centerPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     local bestPlr = nil
     local bestPart = nil
-    local bestDist = math.huge
+    local bestScore = math.huge
     local fovRadius = Combat.Config.SilentAimFOV
 
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -316,11 +331,18 @@ GetTargetPlayerForHitbox = function(wallCheckEnabled)
         local screenPos, onScreen = Camera:WorldToViewportPoint(hitPart.Position)
         if not onScreen then continue end
 
-        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-        if dist <= fovRadius and dist < bestDist then
-            bestDist = dist
-            bestPlr = plr
-            bestPart = hitPart
+        local projectedPos = Vector2.new(screenPos.X, screenPos.Y)
+        local distanceToCenter = (projectedPos - centerPos).Magnitude
+        local hitboxRadius = GetProjectedHitboxRadius(hitPart)
+        local effectiveFov = fovRadius + hitboxRadius
+
+        if distanceToCenter <= effectiveFov then
+            local score = distanceToCenter - hitboxRadius * 0.75
+            if score < bestScore then
+                bestScore = score
+                bestPlr = plr
+                bestPart = hitPart
+            end
         end
     end
 
@@ -331,10 +353,19 @@ local function GetExpanderTargetPlayer()
     return GetTargetPlayerForHitbox(false)
 end
 
+local function NormalizeHitboxPartMode(value)
+    local mode = tostring(value or "Body")
+    if mode:lower() == "headhb" then
+        return "HeadHB"
+    end
+    return "Body"
+end
+
 local function GetExpanderParts(char)
     if not char then return {} end
 
-    if Combat.Config.HitboxPartMode == "HeadHB" then
+    local mode = NormalizeHitboxPartMode(Combat.Config.HitboxPartMode)
+    if mode == "HeadHB" then
         local headHitbox = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head")
         return headHitbox and {headHitbox} or {}
     end
@@ -377,7 +408,8 @@ local function ApplySimpleHitboxExpander()
         end
     end
 
-    local size = Combat.Config.HitboxPartMode == "HeadHB"
+    local mode = NormalizeHitboxPartMode(Combat.Config.HitboxPartMode)
+    local size = mode == "HeadHB"
         and Combat.Config.HeadHBSize
         or Combat.Config.HitboxSize
     local expandedSize = Vector3.new(size, size, size)

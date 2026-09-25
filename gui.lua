@@ -814,7 +814,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
     Label.ZIndex = 4
     Label.Parent = DropFrame
 
-    local selected = default or options[1]
+    local selected = tostring(default or options[1])
 
     local DropBtn = Instance.new("TextButton")
     DropBtn.Size = UDim2.fromOffset(150, 28)
@@ -846,6 +846,13 @@ function Gui:CreateDropdown(label, options, default, callback, y)
     Popup.Visible = false
     Popup.ZIndex = 100
     Popup.Parent = self.ScreenGui
+
+    local function SetSelectedValue(value)
+        local newValue = tostring(value)
+        selected = newValue
+        DropBtn.Text = newValue .. " ▼"
+        if callback then callback(newValue) end
+    end
 
     local PopupCorner = Instance.new("UICorner")
     PopupCorner.CornerRadius = UDim.new(0, 8)
@@ -894,16 +901,17 @@ function Gui:CreateDropdown(label, options, default, callback, y)
             OptBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
         end)
         OptBtn.MouseButton1Click:Connect(function()
-            selected = opt
-            DropBtn.Text = opt .. " ▼"
+            local newValue = tostring(opt)
+            selected = newValue
+            DropBtn.Text = newValue .. " ▼"
             for _, child in ipairs(PopupScroll:GetChildren()) do
                 if child:IsA("TextButton") then
                     local txt = child.Text:gsub("^%s+", "")
-                    child.TextColor3 = txt == opt and RED_BRIGHT or LIGHT
+                    child.TextColor3 = txt == newValue and RED_BRIGHT or LIGHT
                 end
             end
             Popup.Visible = false
-            if callback then callback(opt) end
+            if callback then callback(newValue) end
         end)
     end
 
@@ -918,9 +926,11 @@ function Gui:CreateDropdown(label, options, default, callback, y)
         end
     end)
 
+    SetSelectedValue(selected)
+
     UserInputService.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 and Popup.Visible then
-            local mousePos = UserInputService:GetMouseLocation()
+            local mousePos = Vector2.new(input.Position.X, input.Position.Y)
             local absPos = Popup.AbsolutePosition
             local absSize = Popup.AbsoluteSize
             local btnPos = DropBtn.AbsolutePosition
