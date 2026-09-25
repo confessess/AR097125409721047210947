@@ -328,15 +328,42 @@ local function GetTargetPlayerForHitbox()
     return bestPlr
 end
 
+local function GetTargetPlayerForHitboxNoWallCheck()
+    local mousePos = UserInputService:GetMouseLocation()
+    local bestPlr = nil
+    local bestDist = math.huge
+    local fovRadius = Combat.Config.SilentAimFOV
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr == LocalPlayer then continue end
+        if Combat.Config.TeamCheck and plr.Team == LocalPlayer.Team then continue end
+
+        local char = plr.Character
+        if not char then continue end
+
+        local hitPart = GetSilentAimHitPart(char)
+        if not hitPart then continue end
+
+        local screenPos, onScreen = Camera:WorldToViewportPoint(hitPart.Position)
+        if not onScreen then continue end
+
+        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+        if dist <= fovRadius and dist < bestDist then
+            bestDist = dist
+            bestPlr = plr
+        end
+    end
+
+    return bestPlr
+end
+
 local function ExpandHitboxes()
-    if not Combat.Config.HitboxEnabled and not Combat.Config.SilentAimEnabled then
+    if not Combat.Config.HitboxEnabled then
         RestoreHitboxes()
         return
     end
 
-    Combat.Config.WallCheck = true
-
-    local targetPlr = GetTargetPlayerForHitbox()
+    local targetPlr = GetTargetPlayerForHitboxNoWallCheck()
     if not targetPlr or not targetPlr.Character then
         RestoreHitboxes()
         return
@@ -385,7 +412,7 @@ local function ExpandHitboxes()
 end
 
 RunService.RenderStepped:Connect(function()
-    if Combat.Config.HitboxEnabled or Combat.Config.SilentAimEnabled then
+    if Combat.Config.HitboxEnabled then
         ExpandHitboxes()
     else
         RestoreHitboxes()
