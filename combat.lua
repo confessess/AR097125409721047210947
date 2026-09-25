@@ -137,6 +137,13 @@ end
 local function SyncSilentAimState()
     getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
 
+    if type(GetTargetPlayerForHitbox) ~= "function" or type(GetSilentAimHitPart) ~= "function" then
+        getgenv().__SilentAimConfig.Enabled = false
+        getgenv().__SilentAimConfig.TargetPlayer = nil
+        getgenv().__SilentAimConfig.TargetPart = nil
+        return
+    end
+
     local targetPlr, targetPart = nil, nil
     if Combat.Config.SilentAimEnabled then
         targetPlr = GetTargetPlayerForHitbox()

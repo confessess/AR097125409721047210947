@@ -10,8 +10,8 @@ local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 --// Colors
-local BLACK      = Color3.fromRGB(9, 9, 9)
-local BACKGROUND = Color3.fromRGB(18, 18, 18)
+local BLACK      = Color3.fromRGB(0, 0, 0)
+local BACKGROUND = Color3.fromRGB(6, 6, 6)
 local DARK_PANEL = Color3.fromRGB(14, 14, 14)
 local RED        = Color3.fromRGB(145, 20, 25)
 local RED_BRIGHT = Color3.fromRGB(195, 28, 35)
@@ -24,7 +24,7 @@ local GRAY       = Color3.fromRGB(150, 150, 150)
 local BORDER     = Color3.fromRGB(65, 25, 27)
 
 --// Wave Config
-local WAVE_COLOR        = Color3.fromRGB(210, 210, 210)
+local WAVE_COLOR        = RED_BRIGHT
 local WAVE_PEAK_TRANS   = 0.7
 local WAVE_BAND_WIDTH   = 0.25
 local WAVE_DURATION     = 2.7
