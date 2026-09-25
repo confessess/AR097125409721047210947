@@ -133,7 +133,7 @@ local function GetClosestEnemy()
     return closestTarget
 end
 
---// Silent Aim (hitbox-driven target selection)
+--// Fake Silent Aim: standalone picker using the non-freezing hitbox target logic
 local function SyncSilentAimState()
     getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
 
@@ -146,7 +146,7 @@ local function SyncSilentAimState()
 
     local targetPlr, targetPart = nil, nil
     if Combat.Config.SilentAimEnabled then
-        targetPlr = GetTargetPlayerForHitbox()
+        targetPlr = GetTargetPlayerForHitbox(Combat.Config.WallCheck)
         if targetPlr and targetPlr.Character then
             targetPart = GetSilentAimHitPart(targetPlr.Character)
         end
@@ -286,7 +286,16 @@ local function GetSilentAimHitPart(char)
     return nil
 end
 
-local function GetTargetPlayerForHitbox()
+local function GetTargetPartFamilyForExpansion(targetPart)
+    if not targetPart then return {} end
+    local targetName = string.lower(tostring(targetPart.Name))
+    if targetName == "headhb" or targetName == "head" then
+        return {"HeadHB", "Head"}
+    end
+    return {"UpperTorso", "Torso", "LowerTorso"}
+end
+
+local function GetTargetPlayerForHitbox(wallCheckEnabled)
     local mousePos = UserInputService:GetMouseLocation()
     local bestPlr = nil
     local bestDist = math.huge
@@ -302,7 +311,7 @@ local function GetTargetPlayerForHitbox()
         local hitPart = GetSilentAimHitPart(char)
         if not hitPart then continue end
 
-        if Combat.Config.WallCheck then
+        if wallCheckEnabled then
             local origin = Camera.CFrame.Position
             local direction = hitPart.Position - origin
             local params = RaycastParams.new()
@@ -328,33 +337,8 @@ local function GetTargetPlayerForHitbox()
     return bestPlr
 end
 
-local function GetTargetPlayerForHitboxNoWallCheck()
-    local mousePos = UserInputService:GetMouseLocation()
-    local bestPlr = nil
-    local bestDist = math.huge
-    local fovRadius = Combat.Config.SilentAimFOV
-
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr == LocalPlayer then continue end
-        if Combat.Config.TeamCheck and plr.Team == LocalPlayer.Team then continue end
-
-        local char = plr.Character
-        if not char then continue end
-
-        local hitPart = GetSilentAimHitPart(char)
-        if not hitPart then continue end
-
-        local screenPos, onScreen = Camera:WorldToViewportPoint(hitPart.Position)
-        if not onScreen then continue end
-
-        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-        if dist <= fovRadius and dist < bestDist then
-            bestDist = dist
-            bestPlr = plr
-        end
-    end
-
-    return bestPlr
+local function GetExpanderTargetPlayer()
+    return GetTargetPlayerForHitbox(false)
 end
 
 local function ExpandHitboxes()
@@ -363,7 +347,7 @@ local function ExpandHitboxes()
         return
     end
 
-    local targetPlr = GetTargetPlayerForHitboxNoWallCheck()
+    local targetPlr = GetExpanderTargetPlayer()
     if not targetPlr or not targetPlr.Character then
         RestoreHitboxes()
         return
@@ -386,12 +370,10 @@ local function ExpandHitboxes()
     local crosshairOffset = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
     local expandSize = math.clamp(Combat.Config.HitboxSize + (crosshairOffset * 0.65), Combat.Config.HitboxSize, 40)
 
-    local partsToExpand = {}
-    local targetName = string.lower(tostring(targetPart.Name))
-    if targetName == "headhb" or targetName == "head" then
-        partsToExpand = {"HeadHB", "Head"}
-    else
-        partsToExpand = {"UpperTorso", "Torso", "LowerTorso"}
+    local partsToExpand = GetTargetPartFamilyForExpansion(targetPart)
+    if #partsToExpand == 0 then
+        RestoreHitboxes()
+        return
     end
 
     RestoreHitboxes()
@@ -404,7 +386,11 @@ local function ExpandHitboxes()
                 Transparency = part.Transparency,
                 CanCollide = part.CanCollide,
             }
-            part.Size = Vector3.new(expandSize, expandSize, expandSize)
+
+            -- Arsenal-style hitbox expansion: enlarge only the hitbox part family,
+            -- without permanently warping the whole visible character model.
+            local safeSize = Vector3.new(expandSize, expandSize, expandSize)
+            part.Size = safeSize
             part.Transparency = 1
             part.CanCollide = false
         end
@@ -416,7 +402,6 @@ RunService.RenderStepped:Connect(function()
         ExpandHitboxes()
     else
         RestoreHitboxes()
-        Combat.Config.WallCheck = false
     end
 end)
 
