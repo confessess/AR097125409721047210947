@@ -563,19 +563,11 @@ local function ApplySimpleHitboxExpander()
             }
         end
 
-        if mode == "HeadHB" then
-            part.Transparency = 1
-            part.LocalTransparencyModifier = 1
-            if part.Size ~= expandedSize then
-                part.Size = expandedSize
-            end
-        else
-            part.CanCollide = false
-            part.Transparency = 1
-            part.LocalTransparencyModifier = 1
-            if part.Size ~= expandedSize then
-                part.Size = expandedSize
-            end
+        part.CanCollide = false
+        part.Transparency = 1
+        part.LocalTransparencyModifier = 1
+        if part.Size ~= expandedSize then
+            part.Size = expandedSize
         end
     end
 end
