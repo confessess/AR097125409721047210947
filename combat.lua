@@ -11,6 +11,16 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
+--// Re-execution guard: kill loops from any previous run, restore their parts
+local RUN_ID = tick()
+if getgenv then
+	getgenv().__MM2HubRun = RUN_ID
+	if getgenv().__MM2HubCleanup then
+		pcall(getgenv().__MM2HubCleanup)
+		getgenv().__MM2HubCleanup = nil
+	end
+end
+
 Combat.Config = {
     AimbotEnabled = false,
     AimbotToggleMode = false,
@@ -296,6 +306,7 @@ end
 
 task.spawn(function()
     while true do
+        if getgenv().__MM2HubRun ~= RUN_ID then break end
         ApplyDynamicSilentAimExpansion()
         task.wait(0.1)
     end
@@ -585,7 +596,11 @@ local function ApplySimpleHitboxExpander()
             local size = isHead and headSize or bodySize
             local expandedSize = Vector3.new(size, size, size)
             part.CanCollide = false
-            part.Massless = true
+            if isHead then
+                part.Massless = true
+            elseif OriginalData[part].Massless ~= nil then
+                part.Massless = OriginalData[part].Massless
+            end
             part.Transparency = 1
             part.LocalTransparencyModifier = 1
             if part.Size ~= expandedSize then
@@ -594,6 +609,9 @@ local function ApplySimpleHitboxExpander()
         else
             local expandedSize = Vector3.new(bodySize, bodySize, bodySize)
             part.CanCollide = false
+            if OriginalData[part].Massless ~= nil then
+                part.Massless = OriginalData[part].Massless
+            end
             part.Transparency = 1
             part.LocalTransparencyModifier = 1
             if part.Size ~= expandedSize then
@@ -605,6 +623,7 @@ end
 
 task.spawn(function()
     while true do
+        if getgenv().__MM2HubRun ~= RUN_ID then break end
         if Combat.Config.HitboxEnabled then
             ApplySimpleHitboxExpander()
         else
@@ -956,6 +975,33 @@ function Combat:Init(Gui)
         g.Content = originalContent
     end)
     return self
+end
+
+--// Cleanup for next re-execution: restore every part we touched
+if getgenv then
+    getgenv().__MM2HubCleanup = function()
+        for part, data in pairs(OriginalData) do
+            if part and part.Parent then
+                part.Size = data.Size
+                part.Transparency = data.Transparency
+                if data.LocalTransparencyModifier ~= nil then part.LocalTransparencyModifier = data.LocalTransparencyModifier end
+                if data.CanCollide ~= nil then part.CanCollide = data.CanCollide end
+                if data.Massless ~= nil then part.Massless = data.Massless end
+            end
+        end
+        for part, data in pairs(SilentAimOriginalData) do
+            if part and part.Parent then
+                part.Size = data.Size
+                part.Transparency = data.Transparency
+                if data.LocalTransparencyModifier ~= nil then part.LocalTransparencyModifier = data.LocalTransparencyModifier end
+                if data.CanCollide ~= nil then part.CanCollide = data.CanCollide end
+                if data.Massless ~= nil then part.Massless = data.Massless end
+            end
+        end
+        if killAllConnection then
+            pcall(function() killAllConnection:Disconnect() end)
+        end
+    end
 end
 
 return Combat
