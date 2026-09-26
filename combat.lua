@@ -197,6 +197,9 @@ local function SilentAimRestorePart(part)
         if data.CanCollide ~= nil then
             part.CanCollide = data.CanCollide
         end
+        if data.Massless ~= nil then
+            part.Massless = data.Massless
+        end
     end
     SilentAimOriginalData[part] = nil
     SilentAimExpandedNow[part] = nil
@@ -274,6 +277,7 @@ local function ApplyDynamicSilentAimExpansion()
                 Transparency = p.Transparency,
                 LocalTransparencyModifier = p.LocalTransparencyModifier,
                 CanCollide = p.CanCollide,
+                Massless = p.Massless,
             }
         end
         local orig = SilentAimOriginalData[p].Size
@@ -285,6 +289,7 @@ local function ApplyDynamicSilentAimExpansion()
         p.Transparency = 1
         p.LocalTransparencyModifier = 1
         p.CanCollide = false
+        p.Massless = true
         SilentAimExpandedNow[p] = true
     end
 end
@@ -374,6 +379,9 @@ local function RestoreHitboxes()
             end
             if data.CanCollide ~= nil then
                 part.CanCollide = data.CanCollide
+            end
+            if data.Massless ~= nil then
+                part.Massless = data.Massless
             end
         end
     end
@@ -560,10 +568,12 @@ local function ApplySimpleHitboxExpander()
                 Transparency = part.Transparency,
                 LocalTransparencyModifier = part.LocalTransparencyModifier,
                 CanCollide = part.CanCollide,
+                Massless = part.Massless,
             }
         end
 
         part.CanCollide = false
+        part.Massless = true
         part.Transparency = 1
         part.LocalTransparencyModifier = 1
         if part.Size ~= expandedSize then
