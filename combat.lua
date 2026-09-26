@@ -514,7 +514,15 @@ local function GetExpanderParts(char)
     local mode = NormalizeHitboxPartMode(Combat.Config.HitboxPartMode)
     if mode == "HeadHB" then
         local headHitbox = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head")
-        return headHitbox and {headHitbox} or {}
+        local parts = {
+            char:FindFirstChild("RightUpperLeg"),
+            char:FindFirstChild("LeftUpperLeg"),
+            char:FindFirstChild("HumanoidRootPart"),
+        }
+        if headHitbox then
+            table.insert(parts, headHitbox)
+        end
+        return parts
     end
 
     return {
@@ -556,10 +564,10 @@ local function ApplySimpleHitboxExpander()
     end
 
     local mode = NormalizeHitboxPartMode(Combat.Config.HitboxPartMode)
-    local size = mode == "HeadHB"
-        and Combat.Config.HeadHBSize
+    local headSize = Combat.Config.HeadHBSize
+    local bodySize = mode == "HeadHB"
+        and math.max(1, Combat.Config.HeadHBSize - 1)
         or Combat.Config.HitboxSize
-    local expandedSize = Vector3.new(size, size, size)
 
     for part in pairs(desiredParts) do
         if not OriginalData[part] then
@@ -572,12 +580,25 @@ local function ApplySimpleHitboxExpander()
             }
         end
 
-        part.CanCollide = false
-        part.Massless = true
-        part.Transparency = 1
-        part.LocalTransparencyModifier = 1
-        if part.Size ~= expandedSize then
-            part.Size = expandedSize
+        if mode == "HeadHB" then
+            local isHead = part.Name == "HeadHB" or part.Name == "Head"
+            local size = isHead and headSize or bodySize
+            local expandedSize = Vector3.new(size, size, size)
+            part.CanCollide = false
+            part.Massless = true
+            part.Transparency = 1
+            part.LocalTransparencyModifier = 1
+            if part.Size ~= expandedSize then
+                part.Size = expandedSize
+            end
+        else
+            local expandedSize = Vector3.new(bodySize, bodySize, bodySize)
+            part.CanCollide = false
+            part.Transparency = 1
+            part.LocalTransparencyModifier = 1
+            if part.Size ~= expandedSize then
+                part.Size = expandedSize
+            end
         end
     end
 end
