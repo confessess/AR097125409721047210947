@@ -51,7 +51,8 @@ local function HideAllChams()
 end
 
 local function CreateESP(player)
-    if player == LocalPlayer then return end
+    if player == LocalPlayer or player.Parent ~= Players then return end
+    if ESPObjects[player] then return ESPObjects[player] end
 
     local esp = {
         Player = player,
@@ -140,6 +141,13 @@ local function RemoveESP(player)
 end
 
 local function UpdateESP()
+    for player in pairs(ESPObjects) do
+        if player.Parent ~= Players then RemoveESP(player) end
+    end
+    for player in pairs(Highlights) do
+        if player.Parent ~= Players then RemoveESP(player) end
+    end
+
     if not ESP.Config.Enabled then
         HideAllESP()
         HideAllChams()
@@ -269,6 +277,8 @@ local function UpdateESP()
         if showChams then
             hl.FillColor = ESP.Config.Color
             hl.OutlineColor = ESP.Config.Color
+        else
+            hl.Parent = nil
         end
     end
 end
@@ -276,8 +286,25 @@ end
 RunService.RenderStepped:Connect(UpdateESP)
 
 for _, player in ipairs(Players:GetPlayers()) do if player ~= LocalPlayer then CreateESP(player) end end
-Players.PlayerAdded:Connect(function(p) task.wait(1) CreateESP(p) end)
+Players.PlayerAdded:Connect(function(p) task.wait(1) if p.Parent == Players then CreateESP(p) end end)
 Players.PlayerRemoving:Connect(RemoveESP)
+
+-- Other modules (e.g. kill all) should use this to skip players who left or are dead
+function ESP.IsValidPlayer(player)
+    if not player or player == LocalPlayer or player.Parent ~= Players then return false end
+    local character = player.Character
+    if not character or not character:IsDescendantOf(Workspace) then return false end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    return humanoid ~= nil and humanoid.Health > 0 and character:FindFirstChild("HumanoidRootPart") ~= nil
+end
+
+function ESP.GetValidPlayers()
+    local list = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if ESP.IsValidPlayer(player) then table.insert(list, player) end
+    end
+    return list
+end
 
 function ESP:Init(Gui)
     self.Gui = Gui

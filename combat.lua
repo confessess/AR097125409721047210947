@@ -700,11 +700,11 @@ local function GetClosestEnemyForKillAll()
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Team ~= LocalPlayer.Team then
+        if player ~= LocalPlayer and player.Parent == Players and player.Team ~= LocalPlayer.Team then
             local char = player.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
             local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-            if root and humanoid and humanoid.Health > 0 then
+            if root and humanoid and humanoid.Health > 0 and char:IsDescendantOf(workspace) and not char:FindFirstChildOfClass("ForceField") then
                 local dist = (root.Position - myRoot.Position).Magnitude
                 if dist < closestDist then
                     closestDist = dist
