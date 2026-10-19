@@ -33,6 +33,8 @@ Combat.Config = {
     SilentAimWallCheck = true,
     SilentAimHitPart = "HeadHB",
     SilentAimPrediction = false,
+    SilentAimUseRootPart = false,
+    SilentAimTouchPhysics = false,
     HitboxEnabled = false,
     HitboxPartMode = "Body",
     TeamCheck = true,
@@ -411,8 +413,6 @@ local function SilentAimRestorePart(part)
         end
         if data.CanCollide ~= nil then
             part.CanCollide = data.CanCollide
-        end
-        if data.Massless ~= nil then
             part.Massless = data.Massless
         end
     end
@@ -435,11 +435,15 @@ local function GetSilentAimDynamicParts(char)
         local head = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head")
         return head and {head} or {}
     end
-    return {
+    local parts = {
+        char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso"),
         char:FindFirstChild("RightUpperLeg"),
         char:FindFirstChild("LeftUpperLeg"),
-        char:FindFirstChild("HumanoidRootPart"),
     }
+    if Combat.Config.SilentAimUseRootPart then
+        parts[#parts + 1] = char:FindFirstChild("HumanoidRootPart")
+    end
+    return parts
 end
 
 local function ApplyDynamicSilentAimExpansion()
@@ -454,7 +458,6 @@ local function ApplyDynamicSilentAimExpansion()
     local part = CurrentSilentTargetPart
     local desired = {}
 
-    -- Only expand if the target is still valid and inside the FOV circle
     if plr and part and part.Parent and IsValidTarget(plr) then
         local centerPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
         local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
@@ -472,39 +475,50 @@ local function ApplyDynamicSilentAimExpansion()
         end
     end
 
-    -- Restore anything that is no longer the target
-    for p, _ in pairs(SilentAimExpandedNow) do
+    for p in pairs(SilentAimExpandedNow) do
         if not desired[p] then
             SilentAimRestorePart(p)
         end
     end
 
-    -- Apply proximity-scaled sizes
     local mode = tostring(Combat.Config.HitboxPartMode or "Body")
     local maxSize = (mode:lower() == "headhb")
         and Combat.Config.HeadHBSize
         or Combat.Config.HitboxSize
+    local touchPhysics = Combat.Config.SilentAimTouchPhysics
 
     for p, proximity in pairs(desired) do
         if not SilentAimOriginalData[p] then
-            SilentAimOriginalData[p] = {
+            local data = {
                 Size = p.Size,
                 Transparency = p.Transparency,
                 LocalTransparencyModifier = p.LocalTransparencyModifier,
-                CanCollide = p.CanCollide,
-                Massless = p.Massless,
             }
+            if touchPhysics then
+                data.CanCollide = p.CanCollide
+                data.Massless = p.Massless
+            end
+            SilentAimOriginalData[p] = data
         end
+
         local orig = SilentAimOriginalData[p].Size
-        p.Size = Vector3.new(
+        local newSize = Vector3.new(
             orig.X + (maxSize - orig.X) * proximity,
             orig.Y + (maxSize - orig.Y) * proximity,
             orig.Z + (maxSize - orig.Z) * proximity
         )
+        if (p.Size - newSize).Magnitude > 0.05 then
+            p.Size = newSize
+        end
+
         p.Transparency = 1
         p.LocalTransparencyModifier = 1
-        p.CanCollide = false
-        p.Massless = true
+
+        if touchPhysics then
+            p.CanCollide = false
+            p.Massless = true
+        end
+
         SilentAimExpandedNow[p] = true
     end
 end
@@ -1194,6 +1208,12 @@ function Combat:Init(Gui)
         end, y)
         y = g:CreateSlider("Body Hit Chance %", 0, 100, Combat.Config.BodyHitChance, function(val)
             Combat.Config.BodyHitChance = val
+        end, y)
+        y = g:CreateToggle("Expand Root Part", Combat.Config.SilentAimUseRootPart, function(state)
+            Combat.Config.SilentAimUseRootPart = state
+        end, y)
+        y = g:CreateToggle("Touch Physics (Massless/Collide)", Combat.Config.SilentAimTouchPhysics, function(state)
+            Combat.Config.SilentAimTouchPhysics = state
         end, y)
 
         y = g:CreateSection("Actor Silent Aim", y + 10)
