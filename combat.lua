@@ -898,23 +898,67 @@ end)
 local killAllConnection = nil
 local killAllActive = false
 
+--// True only when the player is genuinely alive and in the round
+local function IsPlayerOnMap(plr)
+    if plr == LocalPlayer then return false end
+    if plr.Parent ~= Players then return false end
+
+    local char = plr.Character
+    if not char or not char:IsDescendantOf(Workspace) then return false end
+
+    -- ignore anyone parked inside a lobby container
+    local ancestor = char.Parent
+    while ancestor and ancestor ~= Workspace do
+        if ancestor.Name:lower():find("lobby") then return false end
+        ancestor = ancestor.Parent
+    end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return false end
+
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+
+    -- MM2 round-state tags
+    local spawned = char:FindFirstChild("Spawned")
+    if spawned and spawned.Value == false then return false end
+
+    local status = char:FindFirstChild("Status")
+    if status then
+        local alive = status:FindFirstChild("Alive")
+        if alive and alive.Value == false then return false end
+        local inRound = status:FindFirstChild("InRound")
+        if inRound and inRound.Value == false then return false end
+    end
+
+    -- still under spawn protection
+    if char:FindFirstChildOfClass("ForceField") then return false end
+
+    -- team / FFA handling, same rules as the aimbot
+    local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
+    local ffa = wkspc and wkspc:FindFirstChild("FFA")
+    local isFFA = ffa and ffa.Value
+    if Combat.Config.TeamCheck and not isFFA then
+        if plr.Team == LocalPlayer.Team then return false end
+    end
+
+    return true
+end
+
 local function GetClosestEnemyForKillAll()
-    local closest = nil
-    local closestDist = math.huge
     local myChar = LocalPlayer.Character
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
+
+    local closest = nil
+    local closestDist = math.huge
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Parent == Players and player.Team ~= LocalPlayer.Team then
-            local char = player.Character
-            local root = char and char:FindFirstChild("HumanoidRootPart")
-            local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-            if root and humanoid and humanoid.Health > 0 and char:IsDescendantOf(workspace) and not char:FindFirstChildOfClass("ForceField") then
-                local dist = (root.Position - myRoot.Position).Magnitude
-                if dist < closestDist then
-                    closestDist = dist
-                    closest = player
-                end
+        if IsPlayerOnMap(player) then
+            local root = player.Character:FindFirstChild("HumanoidRootPart")
+            local dist = (root.Position - myRoot.Position).Magnitude
+            if dist < closestDist then
+                closestDist = dist
+                closest = player
             end
         end
     end
@@ -923,12 +967,19 @@ end
 
 local function KillAllTick()
     if not killAllActive then return end
+
+    -- don't teleport while we're dead or out of the round ourselves
+    local myChar = LocalPlayer.Character
+    if not myChar or not myChar:IsDescendantOf(Workspace) then return end
+    local myHum = myChar:FindFirstChildOfClass("Humanoid")
+    if not myHum or myHum.Health <= 0 then return end
+    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+
     local target = GetClosestEnemyForKillAll()
     if target and target.Character then
         local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-        local myChar = LocalPlayer.Character
-        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-        if targetRoot and myRoot then
+        if targetRoot then
             myRoot.CFrame = CFrame.new(targetRoot.Position - targetRoot.CFrame.LookVector * 5)
             Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetRoot.Position)
         end
