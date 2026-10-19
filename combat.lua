@@ -11,14 +11,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 
+local ENV = (getgenv and getgenv()) or _G
+
 --// Re-execution guard: kill loops from any previous run, restore their parts
 local RUN_ID = tick()
-if getgenv then
-	getgenv().__MM2HubRun = RUN_ID
-	if getgenv().__MM2HubCleanup then
-		pcall(getgenv().__MM2HubCleanup)
-		getgenv().__MM2HubCleanup = nil
-	end
+ENV.__MM2HubRun = RUN_ID
+if ENV.__MM2HubCleanup then
+	pcall(ENV.__MM2HubCleanup)
+	ENV.__MM2HubCleanup = nil
 end
 
 Combat.Config = {
@@ -31,10 +31,8 @@ Combat.Config = {
     SilentAimFOV = 150,
     SilentAimFOVVisible = true,
     SilentAimWallCheck = true,
-    SilentAimHitPart = "HeadHB",
+    SilentAimMode = "Head", -- "Head" | "Body" | "Random"
     SilentAimPrediction = false,
-    SilentAimUseRootPart = false,
-    SilentAimTouchPhysics = false,
     HitboxEnabled = false,
     HitboxPartMode = "Body",
     TeamCheck = true,
@@ -48,13 +46,6 @@ Combat.Config = {
     HitsoundsEnabled = false,
     Hitsound = "Skeet.cc",
     HitsoundVolume = 1,
-    BodyHitEnabled = false,
-    BodyHitChance = 30,
-    ActorSilentAimEnabled = false,
-    ActorSilentAimHitPart = "Head",
-    ActorSilentAimWallCheck = true,
-    ActorSilentAimPrediction = false,
-    ActorSilentAimLoopAllActors = false,
 }
 
 local FOV_Circle = Drawing.new("Circle")
@@ -87,11 +78,17 @@ local function UpdateFOVCircle()
         SilentFOV_Circle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     end
     SilentFOV_Circle.Radius = Combat.Config.SilentAimFOV
-    SilentFOV_Circle.Visible = (Combat.Config.SilentAimEnabled or Combat.Config.ActorSilentAimEnabled) and (Combat.Config.SilentAimFOVVisible ~= false)
+    SilentFOV_Circle.Visible = Combat.Config.SilentAimEnabled and (Combat.Config.SilentAimFOVVisible ~= false)
 end
 
-local function IsVisible(targetPart)
-    if not Combat.Config.WallCheck then return true end
+local function IsVisible(targetPart, override)
+    local enabled
+    if override ~= nil then
+        enabled = override
+    else
+        enabled = Combat.Config.WallCheck
+    end
+    if not enabled then return true end
     if not targetPart then return false end
     local origin = Camera.CFrame.Position
     local direction = targetPart.Position - origin
@@ -108,11 +105,37 @@ local function IsVisible(targetPart)
 end
 
 local IsAiming = false
-local GetSilentAimHitPart
-local GetTargetPlayerForHitbox
 local GetProjectedHitboxRadius
 local CurrentSilentTargetPlr = nil
 local CurrentSilentTargetPart = nil
+
+--// Silent aim mode resolver ("Head" / "Body" / "Random")
+local randomChoice = "Head"
+local randomNext = 0
+local function ResolveSilentAimMode()
+    local mode = Combat.Config.SilentAimMode
+    if mode ~= "Random" then return mode end
+    local now = tick()
+    if now >= randomNext then
+        randomChoice = (math.random() < 0.5) and "Head" or "Body"
+        randomNext = now + math.random(20, 60) / 100 -- 0.2s - 0.6s
+    end
+    return randomChoice
+end
+
+local function GetSilentAimPart(char, mode)
+    if not char then return nil end
+    if mode == "Body" then
+        for _, name in ipairs({"UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}) do
+            local p = char:FindFirstChild(name)
+            if p and p:IsA("BasePart") then return p end
+        end
+        return nil
+    end
+    local head = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head")
+    if head and head:IsA("BasePart") then return head end
+    return nil
+end
 
 local function IsValidTarget(plr)
     if plr == LocalPlayer then return false end
@@ -143,7 +166,7 @@ local function GetClosestEnemy()
     for _, plr in ipairs(Players:GetPlayers()) do
         if not IsValidTarget(plr) then continue end
         local char = plr.Character
-        local targetPart = GetSilentAimHitPart(char)
+        local targetPart = GetSilentAimPart(char, "Head")
         if not targetPart then continue end
         if not IsVisible(targetPart) then continue end
         local pos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
@@ -157,248 +180,101 @@ local function GetClosestEnemy()
     return closestTarget
 end
 
---// Fake Silent Aim: standalone picker using the non-freezing hitbox target logic
-local function SyncSilentAimState()
-    getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
-    getgenv().__ActorSilentAim = getgenv().__ActorSilentAim or {
-        Enabled = false, FOV = 150, TeamCheck = true, WallCheck = true,
-        HitPart = "Head", Prediction = false, FFA = false,
-    }
+--// ============================================================
+--// SILENT AIM (hook-based) — replaces the old fake silent aim
+--// ============================================================
+ENV.__SilentAimConfig = ENV.__SilentAimConfig or {}
+local SilentAimConfig = ENV.__SilentAimConfig
+SilentAimConfig.Enabled = false
+SilentAimConfig.TargetPlayer = nil
+SilentAimConfig.TargetPart = nil
+SilentAimConfig.Prediction = false
 
-    local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
-    local ffaFlag = wkspc and wkspc:FindFirstChild("FFA")
-    local isFFA = (ffaFlag and ffaFlag.Value) and true or false
+local function InstallSilentAimHook()
+    if ENV.__MM2SilentAimInstalled then return end
+    ENV.__MM2SilentAimInstalled = true
 
-    local targetPlr, targetPart = nil, nil
-    if Combat.Config.SilentAimEnabled or Combat.Config.ActorSilentAimEnabled then
-        targetPlr, targetPart = GetTargetPlayerForHitbox(Combat.Config.SilentAimWallCheck)
-    end
-    CurrentSilentTargetPlr = targetPlr
-    CurrentSilentTargetPart = targetPart
+    for _, v in pairs(getgc()) do
+        if type(v) == "function" and islclosure(v) then
 
-    getgenv().__SilentAimConfig.Enabled = Combat.Config.SilentAimEnabled
-    getgenv().__SilentAimConfig.FOV = Combat.Config.SilentAimFOV
-    getgenv().__SilentAimConfig.TeamCheck = Combat.Config.TeamCheck
-    getgenv().__SilentAimConfig.WallCheck = Combat.Config.SilentAimWallCheck
-    getgenv().__SilentAimConfig.BodyHitEnabled = Combat.Config.BodyHitEnabled
-    getgenv().__SilentAimConfig.BodyHitChance = Combat.Config.BodyHitChance
-    getgenv().__SilentAimConfig.HitPart = Combat.Config.SilentAimHitPart
-    getgenv().__SilentAimConfig.Prediction = Combat.Config.SilentAimPrediction
-    getgenv().__SilentAimConfig.TargetPlayer = targetPlr
-    getgenv().__SilentAimConfig.TargetPart = targetPart
+            local success, isMatch = pcall(function()
+                local infoName = debug.info(v, "n")
+                local nameLen = type(infoName) == "string" and #infoName or 0
+                return debug.info(v, "a") == 2
+                    and #debug.getupvalues(v) == 2
+                    and #debug.getconstants(v) == 17
+                    and nameLen <= 10
+            end)
 
-    local asa = getgenv().__ActorSilentAim
-    asa.Enabled = Combat.Config.ActorSilentAimEnabled
-    asa.FOV = Combat.Config.SilentAimFOV
-    asa.TeamCheck = Combat.Config.TeamCheck
-    asa.WallCheck = Combat.Config.ActorSilentAimWallCheck
-    asa.HitPart = Combat.Config.ActorSilentAimHitPart
-    asa.Prediction = Combat.Config.ActorSilentAimPrediction
-    asa.FFA = isFFA
-end
+            if success and isMatch then
+                local old
+                old = hookfunction(v, function(...)
+                    local args = table.pack(...)
+                    local p1 = args[1]
 
-local function StartSilentAim()
-    Combat.Config.SilentAimEnabled = true
-    SyncSilentAimState()
-end
+                    local cfg = ENV.__SilentAimConfig
+                    local target = cfg and cfg.TargetPart
 
-local function StopSilentAim()
-    Combat.Config.SilentAimEnabled = false
-    CurrentSilentTargetPlr = nil
-    CurrentSilentTargetPart = nil
-    getgenv().__SilentAimConfig = getgenv().__SilentAimConfig or {}
-    getgenv().__SilentAimConfig.Enabled = false
-    getgenv().__SilentAimConfig.TargetPlayer = nil
-    getgenv().__SilentAimConfig.TargetPart = nil
-end
+                    if cfg and cfg.Enabled and target and target.Parent then
+                        local myChar = LocalPlayer.Character
+                        local myHead = myChar and myChar:FindFirstChild("Head")
 
---// Actor Silent Aim: hooks the game's raycast closure inside the actor VM
-local ActorSilentAimSource = [=[
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
-local LocalPlayer = Players.LocalPlayer
-local Camera = Workspace.CurrentCamera
+                        if myHead then
+                            local aimPos = target.Position
+                            if cfg.Prediction then
+                                aimPos = aimPos + target.AssemblyLinearVelocity * 0.15
+                            end
 
-local genv = (getgenv and getgenv()) or _G
-if genv.__ActorSilentAimHooked then return end
-genv.__ActorSilentAimHooked = true
+                            local direction = (aimPos - myHead.Position)
 
-genv.__ActorSilentAim = genv.__ActorSilentAim or {
-    Enabled = false, FOV = 150, TeamCheck = true, WallCheck = true,
-    HitPart = "Head", Prediction = false, FFA = false,
-}
-
-local target = nil
-local function Cfg() return genv.__ActorSilentAim end
-
-local function IsValid(plr)
-    if plr == LocalPlayer then return false end
-    local char = plr.Character
-    if not char then return false end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then return false end
-    local spawned = char:FindFirstChild("Spawned")
-    if spawned and not spawned.Value then return false end
-    local status = char:FindFirstChild("Status")
-    if status then
-        local alive = status:FindFirstChild("Alive")
-        if alive and not alive.Value then return false end
-    end
-    local c = Cfg()
-    if c.TeamCheck and not c.FFA then
-        if plr.Team == LocalPlayer.Team then return false end
-    end
-    return true
-end
-
-local function PickPart(char)
-    local c = Cfg()
-    for _, n in ipairs({ c.HitPart, "HeadHB", "Head", "UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart" }) do
-        local p = char:FindFirstChild(n)
-        if p and p:IsA("BasePart") then return p end
-    end
-    return nil
-end
-
-local function WallOk(part, char)
-    local c = Cfg()
-    if not c.WallCheck then return true end
-    local origin = Camera.CFrame.Position
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = { LocalPlayer.Character, char }
-    params.IgnoreWater = true
-    local res = Workspace:Raycast(origin, part.Position - origin, params)
-    if not res then return true end
-    return res.Instance:IsDescendantOf(char)
-end
-
-local function GetClosestPlayer()
-    local c = Cfg()
-    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    local best, bestDist = nil, math.huge
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if IsValid(plr) then
-            local char = plr.Character
-            local part = PickPart(char)
-            if part and WallOk(part, char) then
-                local sp, onScreen = Camera:WorldToViewportPoint(part.Position)
-                if onScreen then
-                    local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
-                    if d <= c.FOV and d < bestDist then
-                        bestDist = d
-                        best = part
+                            if typeof(p1) == "Ray" then
+                                args[1] = Ray.new(myHead.Position, direction)
+                            elseif typeof(p1) == "CFrame" then
+                                args[1] = CFrame.new(myHead.Position, aimPos)
+                            end
+                        end
                     end
-                end
+
+                    return old(table.unpack(args, 1, args.n))
+                end)
             end
         end
     end
-    return best
 end
 
-RunService.RenderStepped:Connect(function()
-    if not Cfg().Enabled then
-        target = nil
-        return
-    end
-    target = GetClosestPlayer()
-end)
+InstallSilentAimHook()
 
-for _, v in pairs(getgc()) do
-    if type(v) == "function" and islclosure(v) then
-        local okA, nargs = pcall(debug.info, v, "a")
-        local okN, nm = pcall(debug.info, v, "n")
-        local okU, nup = pcall(function() return #debug.getupvalues(v) end)
-        local okC, ncon = pcall(function() return #debug.getconstants(v) end)
-        if okA and nargs == 2 and okU and nup == 2 and okC and ncon == 17 and okN and (nm or ""):len() <= 10 then
-            local old
-            old = hookfunction(v, function(p1, p2)
-                local c = Cfg()
-                if c.Enabled and target and target.Parent then
-                    local mychar = LocalPlayer.Character
-                    local head = mychar and mychar:FindFirstChild("Head")
-                    if head then
-                        local aimPos = target.Position
-                        if c.Prediction then
-                            local vel = target.AssemblyLinearVelocity
-                            if vel then aimPos = aimPos + vel * 0.05 end
-                        end
-                        p1 = Ray.new(head.Position, aimPos - head.Position)
-                    end
-                end
-                return old(p1, p2)
-            end)
+local function GetSilentAimTarget()
+    local mode = ResolveSilentAimMode()
+    local closestDistance = math.huge
+    local closestPlr, closestPart = nil, nil
+    local center = Camera.ViewportSize / 2
+
+    for _, v in pairs(Players:GetPlayers()) do
+        if not IsValidTarget(v) then continue end
+
+        local char = v.Character
+        if not char then continue end
+
+        local part = GetSilentAimPart(char, mode)
+        if not part then continue end
+
+        if Combat.Config.SilentAimWallCheck and not IsVisible(part, true) then continue end
+
+        local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+        if onScreen then
+            local distance = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
+            if distance <= Combat.Config.SilentAimFOV and distance < closestDistance then
+                closestDistance = distance
+                closestPlr = v
+                closestPart = part
+            end
         end
     end
+    return closestPlr, closestPart
 end
-]=]
-
-local ActorSilentAimInstalled = false
-local ActorSilentAimList = nil
-
-local function InstallActorSilentAim()
-    if ActorSilentAimInstalled then return true end
-    if not getactors or not run_on_actor then return false end
-
-    local ok = pcall(function()
-        local actors = getactors()
-        assert(actors and #actors > 0, "no actors")
-        ActorSilentAimList = {}
-        local limit = Combat.Config.ActorSilentAimLoopAllActors and #actors or 1
-        for i = 1, limit do
-            ActorSilentAimList[#ActorSilentAimList + 1] = actors[i]
-            run_on_actor(actors[i], ActorSilentAimSource)
-        end
-    end)
-
-    ActorSilentAimInstalled = ok
-    return ok
-end
-
-local function PushActorSilentAim()
-    if not ActorSilentAimInstalled or not ActorSilentAimList then return end
-    local a = getgenv().__ActorSilentAim
-    if not a then return end
-    local src = string.format(
-        "local g = (getgenv and getgenv()) or _G; g.__ActorSilentAim = {Enabled=%s, FOV=%d, TeamCheck=%s, WallCheck=%s, HitPart=%q, Prediction=%s, FFA=%s}",
-        tostring(a.Enabled), math.floor(a.FOV or 150), tostring(a.TeamCheck), tostring(a.WallCheck),
-        tostring(a.HitPart or "Head"), tostring(a.Prediction), tostring(a.FFA))
-    for _, act in ipairs(ActorSilentAimList) do
-        pcall(run_on_actor, act, src)
-    end
-end
-
-local function SetActorSilentAim(state)
-    Combat.Config.ActorSilentAimEnabled = state
-    getgenv().__ActorSilentAim = getgenv().__ActorSilentAim or {
-        Enabled = false, FOV = 150, TeamCheck = true, WallCheck = true,
-        HitPart = "Head", Prediction = false, FFA = false,
-    }
-    getgenv().__ActorSilentAim.Enabled = state
-
-    if state then
-        if not InstallActorSilentAim() then
-            warn("[Combat] Actor Silent Aim: getactors/run_on_actor unavailable")
-        end
-    end
-    PushActorSilentAim()
-    UpdateFOVCircle()
-end
-
-task.spawn(function()
-    while true do
-        if getgenv().__MM2HubRun ~= RUN_ID then break end
-        if ActorSilentAimInstalled then PushActorSilentAim() end
-        task.wait(0.5)
-    end
-end)
 
 --// Dynamic hitbox expansion (silent aim driven)
---// Expands ONLY the current silent aim target, ONLY while inside the FOV
---// circle. Size scales with crosshair proximity — dead center = max size,
---// FOV edge = original size. Anything that stops being the target (or
---// becomes invalid) is restored to its original part properties.
 local SilentAimOriginalData = {}
 local SilentAimExpandedNow = {}
 
@@ -413,6 +289,8 @@ local function SilentAimRestorePart(part)
         end
         if data.CanCollide ~= nil then
             part.CanCollide = data.CanCollide
+        end
+        if data.Massless ~= nil then
             part.Massless = data.Massless
         end
     end
@@ -430,20 +308,15 @@ end
 
 local function GetSilentAimDynamicParts(char)
     if not char then return {} end
-    local mode = tostring(Combat.Config.HitboxPartMode or "Body")
-    if mode:lower() == "headhb" then
+    if ResolveSilentAimMode() == "Head" then
         local head = char:FindFirstChild("HeadHB") or char:FindFirstChild("Head")
         return head and {head} or {}
     end
-    local parts = {
-        char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso"),
+    return {
         char:FindFirstChild("RightUpperLeg"),
         char:FindFirstChild("LeftUpperLeg"),
+        char:FindFirstChild("HumanoidRootPart"),
     }
-    if Combat.Config.SilentAimUseRootPart then
-        parts[#parts + 1] = char:FindFirstChild("HumanoidRootPart")
-    end
-    return parts
 end
 
 local function ApplyDynamicSilentAimExpansion()
@@ -460,7 +333,7 @@ local function ApplyDynamicSilentAimExpansion()
 
     if plr and part and part.Parent and IsValidTarget(plr) then
         local centerPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-        local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+        local screenPos, onScreen = Camera.WorldToViewportPoint(part.Position)
         if onScreen then
             local dist = (Vector2.new(screenPos.X, screenPos.Y) - centerPos).Magnitude
             local radius = GetProjectedHitboxRadius(part)
@@ -475,57 +348,44 @@ local function ApplyDynamicSilentAimExpansion()
         end
     end
 
-    for p in pairs(SilentAimExpandedNow) do
+    for p, _ in pairs(SilentAimExpandedNow) do
         if not desired[p] then
             SilentAimRestorePart(p)
         end
     end
 
-    local mode = tostring(Combat.Config.HitboxPartMode or "Body")
-    local maxSize = (mode:lower() == "headhb")
+    local mode = ResolveSilentAimMode()
+    local maxSize = (mode == "Head")
         and Combat.Config.HeadHBSize
         or Combat.Config.HitboxSize
-    local touchPhysics = Combat.Config.SilentAimTouchPhysics
 
     for p, proximity in pairs(desired) do
         if not SilentAimOriginalData[p] then
-            local data = {
+            SilentAimOriginalData[p] = {
                 Size = p.Size,
                 Transparency = p.Transparency,
                 LocalTransparencyModifier = p.LocalTransparencyModifier,
+                CanCollide = p.CanCollide,
+                Massless = p.Massless,
             }
-            if touchPhysics then
-                data.CanCollide = p.CanCollide
-                data.Massless = p.Massless
-            end
-            SilentAimOriginalData[p] = data
         end
-
         local orig = SilentAimOriginalData[p].Size
-        local newSize = Vector3.new(
+        p.Size = Vector3.new(
             orig.X + (maxSize - orig.X) * proximity,
             orig.Y + (maxSize - orig.Y) * proximity,
             orig.Z + (maxSize - orig.Z) * proximity
         )
-        if (p.Size - newSize).Magnitude > 0.05 then
-            p.Size = newSize
-        end
-
         p.Transparency = 1
         p.LocalTransparencyModifier = 1
-
-        if touchPhysics then
-            p.CanCollide = false
-            p.Massless = true
-        end
-
+        p.CanCollide = false
+        p.Massless = true
         SilentAimExpandedNow[p] = true
     end
 end
 
 task.spawn(function()
     while true do
-        if getgenv().__MM2HubRun ~= RUN_ID then break end
+        if ENV.__MM2HubRun ~= RUN_ID then break end
         ApplyDynamicSilentAimExpansion()
         task.wait(0.1)
     end
@@ -572,7 +432,25 @@ end)
 --// Main render loop
 RunService.RenderStepped:Connect(function()
     UpdateFOVCircle()
-    SyncSilentAimState()
+
+    --// Silent aim target update
+    if Combat.Config.SilentAimEnabled then
+        local plr, part = GetSilentAimTarget()
+        SilentAimConfig.Enabled = true
+        SilentAimConfig.TargetPlayer = plr
+        SilentAimConfig.TargetPart = part
+        SilentAimConfig.Prediction = Combat.Config.SilentAimPrediction
+        CurrentSilentTargetPlr = plr
+        CurrentSilentTargetPart = part
+    else
+        if SilentAimConfig.Enabled then
+            SilentAimConfig.Enabled = false
+            SilentAimConfig.TargetPlayer = nil
+            SilentAimConfig.TargetPart = nil
+        end
+        CurrentSilentTargetPlr = nil
+        CurrentSilentTargetPart = nil
+    end
 
     local shouldAim = false
     if Combat.Config.AimbotEnabled then
@@ -593,7 +471,6 @@ RunService.RenderStepped:Connect(function()
             end
         end
     end
-
 end)
 
 --// Hitbox Expander
@@ -618,49 +495,6 @@ local function RestoreHitboxes()
     OriginalData = {}
 end
 
-GetSilentAimHitPart = function(char)
-    if not char then return nil end
-
-    local torsoParts = {"UpperTorso", "Torso", "LowerTorso"}
-    local headParts = {"HeadHB", "Head"}
-    local preferred = Combat.Config.SilentAimHitPart or "HeadHB"
-
-    if Combat.Config.BodyHitEnabled then
-        local chance = tonumber(Combat.Config.BodyHitChance) or 0
-        if math.random(1, 100) <= chance then
-            for _, partName in ipairs(torsoParts) do
-                local part = char:FindFirstChild(partName)
-                if part and part:IsA("BasePart") then
-                    return part
-                end
-            end
-        end
-    end
-
-    for _, partName in ipairs({preferred, "HeadHB", "Head"}) do
-        local part = char:FindFirstChild(partName)
-        if part and part:IsA("BasePart") then
-            return part
-        end
-    end
-
-    for _, partName in ipairs(torsoParts) do
-        local part = char:FindFirstChild(partName)
-        if part and part:IsA("BasePart") then
-            return part
-        end
-    end
-
-    for _, partName in ipairs(headParts) do
-        local part = char:FindFirstChild(partName)
-        if part and part:IsA("BasePart") then
-            return part
-        end
-    end
-
-    return nil
-end
-
 GetProjectedHitboxRadius = function(part)
     if not part or not part:IsA("BasePart") then return 0 end
 
@@ -674,60 +508,6 @@ GetProjectedHitboxRadius = function(part)
     local worldHeight = 2 * math.tan(fovRadians / 2) * distance
     local viewportScale = Camera.ViewportSize.Y / worldHeight
     return radiusWorld * viewportScale
-end
-
-GetTargetPlayerForHitbox = function(wallCheckEnabled)
-    local centerPos = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    local bestPlr = nil
-    local bestPart = nil
-    local bestScore = math.huge
-    local fovRadius = Combat.Config.SilentAimFOV
-
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if not IsValidTarget(plr) then continue end
-
-        local char = plr.Character
-        if not char then continue end
-
-        local hitPart = GetSilentAimHitPart(char)
-        if not hitPart then continue end
-
-        if wallCheckEnabled then
-            local origin = Camera.CFrame.Position
-            local direction = hitPart.Position - origin
-            local params = RaycastParams.new()
-            params.FilterType = Enum.RaycastFilterType.Exclude
-            params.FilterDescendantsInstances = {LocalPlayer.Character, char}
-            params.IgnoreWater = true
-            local result = Workspace:Raycast(origin, direction, params)
-            if result and not result.Instance:IsDescendantOf(char) then
-                continue
-            end
-        end
-
-        local screenPos, onScreen = Camera:WorldToViewportPoint(hitPart.Position)
-        if not onScreen then continue end
-
-        local projectedPos = Vector2.new(screenPos.X, screenPos.Y)
-        local distanceToCenter = (projectedPos - centerPos).Magnitude
-        local hitboxRadius = GetProjectedHitboxRadius(hitPart)
-        local effectiveFov = fovRadius + hitboxRadius
-
-        if distanceToCenter <= effectiveFov then
-            local score = distanceToCenter - hitboxRadius * 0.75
-            if score < bestScore then
-                bestScore = score
-                bestPlr = plr
-                bestPart = hitPart
-            end
-        end
-    end
-
-    return bestPlr, bestPart
-end
-
-local function GetExpanderTargetPlayer()
-    return GetTargetPlayerForHitbox(false)
 end
 
 local function NormalizeHitboxPartMode(value)
@@ -842,7 +622,7 @@ end
 
 task.spawn(function()
     while true do
-        if getgenv().__MM2HubRun ~= RUN_ID then break end
+        if ENV.__MM2HubRun ~= RUN_ID then break end
         if Combat.Config.HitboxEnabled then
             ApplySimpleHitboxExpander()
         else
@@ -912,67 +692,23 @@ end)
 local killAllConnection = nil
 local killAllActive = false
 
---// True only when the player is genuinely alive and in the round
-local function IsPlayerOnMap(plr)
-    if plr == LocalPlayer then return false end
-    if plr.Parent ~= Players then return false end
-
-    local char = plr.Character
-    if not char or not char:IsDescendantOf(Workspace) then return false end
-
-    -- ignore anyone parked inside a lobby container
-    local ancestor = char.Parent
-    while ancestor and ancestor ~= Workspace do
-        if ancestor.Name:lower():find("lobby") then return false end
-        ancestor = ancestor.Parent
-    end
-
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then return false end
-
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if not root then return false end
-
-    -- MM2 round-state tags
-    local spawned = char:FindFirstChild("Spawned")
-    if spawned and spawned.Value == false then return false end
-
-    local status = char:FindFirstChild("Status")
-    if status then
-        local alive = status:FindFirstChild("Alive")
-        if alive and alive.Value == false then return false end
-        local inRound = status:FindFirstChild("InRound")
-        if inRound and inRound.Value == false then return false end
-    end
-
-    -- still under spawn protection
-    if char:FindFirstChildOfClass("ForceField") then return false end
-
-    -- team / FFA handling, same rules as the aimbot
-    local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
-    local ffa = wkspc and wkspc:FindFirstChild("FFA")
-    local isFFA = ffa and ffa.Value
-    if Combat.Config.TeamCheck and not isFFA then
-        if plr.Team == LocalPlayer.Team then return false end
-    end
-
-    return true
-end
-
 local function GetClosestEnemyForKillAll()
+    local closest = nil
+    local closestDist = math.huge
     local myChar = LocalPlayer.Character
     local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
-
-    local closest = nil
-    local closestDist = math.huge
     for _, player in ipairs(Players:GetPlayers()) do
-        if IsPlayerOnMap(player) then
-            local root = player.Character:FindFirstChild("HumanoidRootPart")
-            local dist = (root.Position - myRoot.Position).Magnitude
-            if dist < closestDist then
-                closestDist = dist
-                closest = player
+        if player ~= LocalPlayer and player.Parent == Players and player.Team ~= LocalPlayer.Team then
+            local char = player.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+            if root and humanoid and humanoid.Health > 0 and char:IsDescendantOf(workspace) and not char:FindFirstChildOfClass("ForceField") then
+                local dist = (root.Position - myRoot.Position).Magnitude
+                if dist < closestDist then
+                    closestDist = dist
+                    closest = player
+                end
             end
         end
     end
@@ -981,19 +717,12 @@ end
 
 local function KillAllTick()
     if not killAllActive then return end
-
-    -- don't teleport while we're dead or out of the round ourselves
-    local myChar = LocalPlayer.Character
-    if not myChar or not myChar:IsDescendantOf(Workspace) then return end
-    local myHum = myChar:FindFirstChildOfClass("Humanoid")
-    if not myHum or myHum.Health <= 0 then return end
-    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
-    if not myRoot then return end
-
     local target = GetClosestEnemyForKillAll()
     if target and target.Character then
         local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-        if targetRoot then
+        local myChar = LocalPlayer.Character
+        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if targetRoot and myRoot then
             myRoot.CFrame = CFrame.new(targetRoot.Position - targetRoot.CFrame.LookVector * 5)
             Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetRoot.Position)
         end
@@ -1179,10 +908,12 @@ function Combat:Init(Gui)
         y = g:CreateSection("Silent Aim", y + 10)
         y = g:CreateToggle("Silent Aim", Combat.Config.SilentAimEnabled, function(state)
             Combat.Config.SilentAimEnabled = state
-            if state then
-                StartSilentAim()
-            else
-                StopSilentAim()
+            if not state then
+                SilentAimConfig.Enabled = false
+                SilentAimConfig.TargetPlayer = nil
+                SilentAimConfig.TargetPart = nil
+                CurrentSilentTargetPlr = nil
+                CurrentSilentTargetPart = nil
             end
             UpdateFOVCircle()
         end, y)
@@ -1193,8 +924,8 @@ function Combat:Init(Gui)
             Combat.Config.SilentAimFOV = val
             UpdateFOVCircle()
         end, y)
-        y = g:CreateDropdown("Hit Part", {"HeadHB", "Head", "UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}, Combat.Config.SilentAimHitPart, function(val)
-            Combat.Config.SilentAimHitPart = val
+        y = g:CreateDropdown("Hit Part", {"Head", "Body", "Random"}, Combat.Config.SilentAimMode, function(val)
+            Combat.Config.SilentAimMode = val
         end, y)
         y = g:CreateToggle("Prediction", Combat.Config.SilentAimPrediction, function(state)
             Combat.Config.SilentAimPrediction = state
@@ -1202,35 +933,6 @@ function Combat:Init(Gui)
         y = g:CreateToggle("Show Silent FOV", Combat.Config.SilentAimFOVVisible, function(state)
             Combat.Config.SilentAimFOVVisible = state
             UpdateFOVCircle()
-        end, y)
-        y = g:CreateToggle("Body Hit Redirection", Combat.Config.BodyHitEnabled, function(state)
-            Combat.Config.BodyHitEnabled = state
-        end, y)
-        y = g:CreateSlider("Body Hit Chance %", 0, 100, Combat.Config.BodyHitChance, function(val)
-            Combat.Config.BodyHitChance = val
-        end, y)
-        y = g:CreateToggle("Expand Root Part", Combat.Config.SilentAimUseRootPart, function(state)
-            Combat.Config.SilentAimUseRootPart = state
-        end, y)
-        y = g:CreateToggle("Touch Physics (Massless/Collide)", Combat.Config.SilentAimTouchPhysics, function(state)
-            Combat.Config.SilentAimTouchPhysics = state
-        end, y)
-
-        y = g:CreateSection("Actor Silent Aim", y + 10)
-        y = g:CreateToggle("Actor Silent Aim", Combat.Config.ActorSilentAimEnabled, function(state)
-            SetActorSilentAim(state)
-        end, y)
-        y = g:CreateToggle("Loop All Actors", Combat.Config.ActorSilentAimLoopAllActors, function(state)
-            Combat.Config.ActorSilentAimLoopAllActors = state
-        end, y)
-        y = g:CreateToggle("Actor Wall Check", Combat.Config.ActorSilentAimWallCheck, function(state)
-            Combat.Config.ActorSilentAimWallCheck = state
-        end, y)
-        y = g:CreateDropdown("Actor Hit Part", {"Head", "HeadHB", "UpperTorso", "Torso", "LowerTorso", "HumanoidRootPart"}, Combat.Config.ActorSilentAimHitPart, function(val)
-            Combat.Config.ActorSilentAimHitPart = val
-        end, y)
-        y = g:CreateToggle("Actor Prediction", Combat.Config.ActorSilentAimPrediction, function(state)
-            Combat.Config.ActorSilentAimPrediction = state
         end, y)
 
         y = g:CreateSection("Hitbox Expander", y + 10)
@@ -1271,37 +973,32 @@ function Combat:Init(Gui)
 end
 
 --// Cleanup for next re-execution: restore every part we touched
-if getgenv then
-    getgenv().__MM2HubCleanup = function()
-        for part, data in pairs(OriginalData) do
-            if part and part.Parent then
-                part.Size = data.Size
-                part.Transparency = data.Transparency
-                if data.LocalTransparencyModifier ~= nil then part.LocalTransparencyModifier = data.LocalTransparencyModifier end
-                if data.CanCollide ~= nil then part.CanCollide = data.CanCollide end
-                if data.Massless ~= nil then part.Massless = data.Massless end
-            end
+ENV.__MM2HubCleanup = function()
+    for part, data in pairs(OriginalData) do
+        if part and part.Parent then
+            part.Size = data.Size
+            part.Transparency = data.Transparency
+            if data.LocalTransparencyModifier ~= nil then part.LocalTransparencyModifier = data.LocalTransparencyModifier end
+            if data.CanCollide ~= nil then part.CanCollide = data.CanCollide end
+            if data.Massless ~= nil then part.Massless = data.Massless end
         end
-        for part, data in pairs(SilentAimOriginalData) do
-            if part and part.Parent then
-                part.Size = data.Size
-                part.Transparency = data.Transparency
-                if data.LocalTransparencyModifier ~= nil then part.LocalTransparencyModifier = data.LocalTransparencyModifier end
-                if data.CanCollide ~= nil then part.CanCollide = data.CanCollide end
-                if data.Massless ~= nil then part.Massless = data.Massless end
-            end
+    end
+    for part, data in pairs(SilentAimOriginalData) do
+        if part and part.Parent then
+            part.Size = data.Size
+            part.Transparency = data.Transparency
+            if data.LocalTransparencyModifier ~= nil then part.LocalTransparencyModifier = data.LocalTransparencyModifier end
+            if data.CanCollide ~= nil then part.CanCollide = data.CanCollide end
+            if data.Massless ~= nil then part.Massless = data.Massless end
         end
-        getgenv().__ActorSilentAim = getgenv().__ActorSilentAim or { Enabled = false }
-        getgenv().__ActorSilentAim.Enabled = false
-        if ActorSilentAimInstalled and ActorSilentAimList then
-            for _, act in ipairs(ActorSilentAimList) do
-                pcall(run_on_actor, act,
-                    "local g=(getgenv and getgenv()) or _G; if g.__ActorSilentAim then g.__ActorSilentAim.Enabled = false end")
-            end
-        end
-        if killAllConnection then
-            pcall(function() killAllConnection:Disconnect() end)
-        end
+    end
+    if killAllConnection then
+        pcall(function() killAllConnection:Disconnect() end)
+    end
+    if ENV.__SilentAimConfig then
+        ENV.__SilentAimConfig.Enabled = false
+        ENV.__SilentAimConfig.TargetPart = nil
+        ENV.__SilentAimConfig.TargetPlayer = nil
     end
 end
 
