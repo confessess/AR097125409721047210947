@@ -26,6 +26,7 @@ local GunModsModule = LoadModule("gunmods.lua")
 local MovementModule = LoadModule("movement.lua")
 local WorldModule = LoadModule("world.lua")
 local SkinChangerModule = LoadModule("skinchanger.lua")
+local ViewmodelCustomizerModule = LoadModule("weaponchanger.lua")
 
 local Gui = GuiModule:Init()
 if not Gui or type(Gui.CreateTab) ~= "function" then
@@ -58,6 +59,9 @@ if WorldModule and type(WorldModule.Init) == "function" then
 end
 if SkinChangerModule and type(SkinChangerModule.Init) == "function" then
     SkinChangerModule:Init(Gui)
+end
+if ViewmodelCustomizerModule and type(ViewmodelCustomizerModule.Init) == "function" then
+    ViewmodelCustomizerModule:Init(Gui)
 end
 
 --// CONFIG SYSTEM — automatic save/load
