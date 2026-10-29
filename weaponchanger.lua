@@ -1,5 +1,3 @@
-
-
 local ViewmodelCustomizer = {}
 ViewmodelCustomizer.__index = ViewmodelCustomizer
 
@@ -206,29 +204,19 @@ function ViewmodelCustomizer:Init(Gui)
             end
         end, y)
 
-        y = g:CreateSection("Colors", y + 10)
+        -- Color wheel instead of preset buttons
+        y = g:CreateSection("Color", y + 10)
 
-        local ColorPresets = {
-            {Name = "Red", Color = Color3.fromRGB(255, 0, 0)},
-            {Name = "Blue", Color = Color3.fromRGB(0, 100, 255)},
-            {Name = "Green", Color = Color3.fromRGB(0, 255, 0)},
-            {Name = "Purple", Color = Color3.fromRGB(150, 0, 255)},
-            {Name = "Cyan", Color = Color3.fromRGB(0, 255, 255)},
-            {Name = "White", Color = Color3.fromRGB(255, 255, 255)},
-        }
-
-        for _, preset in ipairs(ColorPresets) do
-            y = g:CreateButton(preset.Name, function()
-                ViewmodelCustomizer.Config.CloneColor = preset.Color
-                if State.CloneVM then
-                    for _, desc in ipairs(State.CloneVM:GetDescendants()) do
-                        if desc:IsA("BasePart") then
-                            desc.Color = preset.Color
-                        end
+        y = g:CreateColorPicker("Color", ViewmodelCustomizer.Config.CloneColor, function(c)
+            ViewmodelCustomizer.Config.CloneColor = c
+            if State.CloneVM then
+                for _, desc in ipairs(State.CloneVM:GetDescendants()) do
+                    if desc:IsA("BasePart") then
+                        desc.Color = c
                     end
                 end
-            end, y)
-        end
+            end
+        end, y)
 
         g.Content = originalContent
     end)
