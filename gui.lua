@@ -236,7 +236,7 @@ function Gui:Init()
     Title.Size = UDim2.new(1, -140, 0, 26)
     Title.Position = UDim2.fromOffset(22, 10)
     Title.BackgroundTransparency = 1
-    Title.Text = "Light hub"
+    Title.Text = "untitled arsenal script"
     Title.TextColor3 = WHITE
     Title.TextSize = 20
     Title.Font = Enum.Font.GothamBold
