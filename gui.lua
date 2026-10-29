@@ -874,7 +874,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
         OptBtn.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
         OptBtn.BorderSizePixel = 0
         OptBtn.Text = "  " .. opt
-        OptBtn.TextColor3 = opt == selected and accent or LIGHT
+        OptBtn.TextColor3 = opt == selected and accent or 
         OptBtn.TextSize = 11
         OptBtn.Font = Enum.Font.GothamMedium
         OptBtn.TextXAlignment = Enum.TextXAlignment.Left
