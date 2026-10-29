@@ -27,15 +27,12 @@ ESP.Config = {
 }
 
 local METERS_PER_STUD = 0.28
--- Roblox renders ~31 Highlights at once; 6 parts x 4 players stays under it
 local MAX_HIGHLIGHT_PLAYERS = 4
 
 local Visuals = {}
 local TracerFolder = nil
-local HighlightFolder = nil
 local ESPGui = nil
 
--- one box per body region, resolved to whichever rig variant exists
 local PART_ALIASES = {
     { "Head" },
     { "UpperTorso", "Torso" },
@@ -87,17 +84,6 @@ local function ensureGui()
     end
     ESPGui = gui
     return gui
-end
-
--- Highlights go in Workspace, not a ScreenGui — that is the reliable parent
-local function ensureHighlightFolder()
-    if HighlightFolder and HighlightFolder.Parent then return HighlightFolder end
-    local existing = Workspace:FindFirstChild("ENI_ESP_Highlights")
-    if existing then existing:Destroy() end
-    HighlightFolder = Instance.new("Folder")
-    HighlightFolder.Name = "ENI_ESP_Highlights"
-    HighlightFolder.Parent = Workspace
-    return HighlightFolder
 end
 
 local function ensureTracerFolder()
@@ -227,6 +213,9 @@ local function createVisual(player)
 end
 
 --// ── highlights (boxes + chams share one set) ───────────────────
+--// Each Highlight is parented to its own adornee part. That arrangement
+--// survives part respawns, folder cleanup and Character re-parenting, and
+--// it is the one the renderer actually honours.
 local function resolveParts(character)
     local parts = {}
     for _, alias in ipairs(PART_ALIASES) do
@@ -272,14 +261,17 @@ local function syncHighlights(v, character, enabled, boxes, chams)
         v.modeKey = nil
 
         if character then
-            local folder = ensureHighlightFolder()
             for _, part in ipairs(resolveParts(character)) do
                 local hl = Instance.new("Highlight")
                 hl.Name = "ENI_Body_" .. part.Name
                 hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                hl.Adornee = part
+                hl.FillColor = ESP.Config.Color
+                hl.OutlineColor = ESP.Config.Color
+                hl.FillTransparency = 0.5
+                hl.OutlineTransparency = 0
                 hl.Enabled = false
-                hl.Parent = folder
+                hl.Parent = part          -- parented to its own adornee
+                hl.Adornee = part
                 v.highlights[part] = hl
             end
         end
@@ -291,12 +283,15 @@ local function syncHighlights(v, character, enabled, boxes, chams)
     end
 
     applyHighlightStyle(v, boxes, chams)
+
     for part, hl in pairs(v.highlights) do
         if not part.Parent then
             pcall(function() hl:Destroy() end)
             v.highlights[part] = nil
         else
-            hl.Enabled = true
+            --// re-assert every frame; the game can strip Adornee on respawn
+            if hl.Adornee ~= part then hl.Adornee = part end
+            if not hl.Enabled then hl.Enabled = true end
         end
     end
 end
@@ -337,7 +332,6 @@ local function step()
             local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
 
             local alive = root and humanoid and humanoid.Health > 0
-            -- Arsenal is FFA: Team is nil for everyone, so nil must not match
             local sameTeam = cfg.TeamCheck
                 and LocalPlayer.Team ~= nil
                 and player.Team == LocalPlayer.Team
@@ -432,7 +426,7 @@ RunService.RenderStepped:Connect(step)
 
 Players.PlayerRemoving:Connect(destroyVisual)
 
---// ── public API (used by combat.lua kill all) ───────────────────
+--// ── public API ─────────────────────────────────────────────────
 function ESP.IsValidPlayer(player)
     if not player or player == LocalPlayer or player.Parent ~= Players then return false end
     local character = player.Character
