@@ -1,299 +1,389 @@
+--// ═══════════════════════════════════════════════════════════════
+--//  MODULE: esp.lua
+--//  Highlight / Billboard / Beam ESP  (ported approach)
+--// ═══════════════════════════════════════════════════════════════
 local ESP = {}
 ESP.__index = ESP
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
+local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 
 ESP.Config = {
     Enabled = false,
     Boxes = false,
+    Chams = false,
     Names = false,
     Health = false,
     Distance = false,
     Weapon = false,
-    Chams = false,
+    Tracers = false,
     TeamCheck = true,
     RenderDistance = 1000,
-    Color = Color3.fromRGB(255, 0, 0),
+    Color = Color3.fromRGB(255, 0, 45),
 }
 
-local ESPObjects = {}
-local Highlights = {}
+local METERS_PER_STUD = 0.28
+local Visuals = {}
+local TracerFolder = nil
+local ESPGui = nil
 
-local function HideESP(esp)
-    if not esp then return end
-    esp.Box.Visible = false
-    esp.BoxOutline.Visible = false
-    esp.Name.Visible = false
-    esp.HealthBar.Visible = false
-    esp.HealthBarOutline.Visible = false
-    esp.HealthText.Visible = false
-    esp.Distance.Visible = false
-    esp.Weapon.Visible = false
+local BODY_PARTS = {
+    Head = true, Torso = true, UpperTorso = true, LowerTorso = true,
+    LeftArm = true, RightArm = true, LeftLeg = true, RightLeg = true,
+    LeftUpperArm = true, LeftLowerArm = true, LeftHand = true,
+    RightUpperArm = true, RightLowerArm = true, RightHand = true,
+    LeftUpperLeg = true, LeftLowerLeg = true, LeftFoot = true,
+    RightUpperLeg = true, RightLowerLeg = true, RightFoot = true,
+}
+
+--// ── helpers ────────────────────────────────────────────────────
+local function colorHex(c)
+    return string.format("#%02X%02X%02X",
+        math.floor(c.R * 255 + 0.5),
+        math.floor(c.G * 255 + 0.5),
+        math.floor(c.B * 255 + 0.5))
 end
 
-local function HideAllESP()
-    for _, esp in pairs(ESPObjects) do
-        HideESP(esp)
+local function escapeRichText(value)
+    return tostring(value or "")
+        :gsub("&", "&amp;")
+        :gsub("<", "&lt;")
+        :gsub(">", "&gt;")
+end
+
+local function formatMeters(meters)
+    if meters < 100 then
+        return (string.format("%.1f", meters):gsub("%.0$", "")) .. " m"
+    end
+    return tostring(math.floor(meters + 0.5)) .. " m"
+end
+
+local function healthColor(ratio)
+    if ratio <= 0.25 then return "#FF405B" end
+    if ratio <= 0.65 then return "#FFD34D" end
+    return "#55DDFF"
+end
+
+local function ensureGui()
+    if ESPGui and ESPGui.Parent then return ESPGui end
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ENI_ESP"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.DisplayOrder = 999
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    local ok = pcall(function() gui.Parent = CoreGui end)
+    if not ok or not gui.Parent then
+        gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    end
+    ESPGui = gui
+    return gui
+end
+
+local function ensureTracerFolder()
+    if TracerFolder and TracerFolder.Parent then return TracerFolder end
+    local existing = Workspace:FindFirstChild("ENI_Tracers")
+    if existing then existing:Destroy() end
+    TracerFolder = Instance.new("Folder")
+    TracerFolder.Name = "ENI_Tracers"
+    TracerFolder.Parent = Workspace
+    return TracerFolder
+end
+
+local function chestPart(character)
+    if not character then return nil end
+    return character:FindFirstChild("UpperTorso")
+        or character:FindFirstChild("Torso")
+        or character:FindFirstChild("HumanoidRootPart")
+end
+
+local function createChestAttachment(character, name)
+    local chest = chestPart(character)
+    if not chest or not chest:IsA("BasePart") then return nil end
+    local attachment = Instance.new("Attachment")
+    attachment.Name = name
+    attachment.Position = (chest.Name == "HumanoidRootPart")
+        and Vector3.new(0, math.max(1.2, chest.Size.Y * 0.6), 0)
+        or Vector3.zero
+    attachment.Parent = chest
+    return attachment
+end
+
+local LocalSourceAttachment = nil
+
+local function ensureSourceAttachment(character)
+    local chest = chestPart(character)
+    if not chest then return nil end
+    if LocalSourceAttachment and LocalSourceAttachment.Parent == chest then
+        return LocalSourceAttachment
+    end
+    if LocalSourceAttachment then pcall(function() LocalSourceAttachment:Destroy() end) end
+    LocalSourceAttachment = createChestAttachment(character, "ENI_TracerSource")
+    return LocalSourceAttachment
+end
+
+local function clearSourceAttachment()
+    if LocalSourceAttachment then
+        pcall(function() LocalSourceAttachment:Destroy() end)
+        LocalSourceAttachment = nil
     end
 end
 
-local function HideAllChams()
-    for _, hl in pairs(Highlights) do
-        hl.Enabled = false
-        hl.Parent = nil
-    end
+--// ── object lifecycle ───────────────────────────────────────────
+local function destroyVisual(player)
+    local v = Visuals[player]
+    if not v then return end
+    Visuals[player] = nil
+    if v.billboard then pcall(function() v.billboard:Destroy() end) end
+    if v.tracer then pcall(function() v.tracer:Destroy() end) end
+    if v.tracerAttachment then pcall(function() v.tracerAttachment:Destroy() end) end
+    if v.chams then pcall(function() v.chams:Destroy() end) end
+    for _, hl in pairs(v.highlights or {}) do pcall(function() hl:Destroy() end) end
 end
 
-local function CreateESP(player)
-    if player == LocalPlayer or player.Parent ~= Players then return end
-    if ESPObjects[player] then return ESPObjects[player] end
+local function clearAll()
+    for player in pairs(Visuals) do destroyVisual(player) end
+    clearSourceAttachment()
+end
 
-    local esp = {
-        Player = player,
-        Box = Drawing.new("Square"),
-        BoxOutline = Drawing.new("Square"),
-        Name = Drawing.new("Text"),
-        HealthBar = Drawing.new("Square"),
-        HealthBarOutline = Drawing.new("Square"),
-        HealthText = Drawing.new("Text"),
-        Distance = Drawing.new("Text"),
-        Weapon = Drawing.new("Text"),
+local function hideVisual(v)
+    if v.billboard then v.billboard.Enabled = false; v.billboard.Adornee = nil end
+    if v.tracer then v.tracer.Enabled = false end
+    if v.chams then v.chams.Enabled = false end
+    for _, hl in pairs(v.highlights or {}) do hl.Enabled = false end
+end
+
+local function createVisual(player)
+    local v = Visuals[player]
+    if v then return v end
+
+    local gui = ensureGui()
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "ENI_Label_" .. player.Name
+    billboard.Size = UDim2.fromOffset(320, 90)
+    billboard.StudsOffsetWorldSpace = Vector3.new(0, 7, 0)
+    billboard.AlwaysOnTop = true
+    billboard.LightInfluence = 0
+    billboard.MaxDistance = 2500
+    billboard.Enabled = false
+    billboard.Parent = gui
+
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.fromScale(1, 1)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = ESP.Config.Color
+    label.TextStrokeColor3 = Color3.new(0, 0, 0)
+    label.TextStrokeTransparency = 0.1
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 13
+    label.TextWrapped = true
+    label.RichText = true
+    label.TextYAlignment = Enum.TextYAlignment.Center
+    label.ZIndex = 3
+    label.Parent = billboard
+
+    local tracer = Instance.new("Beam")
+    tracer.Name = "ENI_Tracer_" .. player.Name
+    tracer.Color = ColorSequence.new(ESP.Config.Color)
+    tracer.Transparency = NumberSequence.new(0)
+    tracer.Width0 = 0.1
+    tracer.Width1 = 0.1
+    tracer.FaceCamera = true
+    tracer.LightEmission = 1
+    tracer.LightInfluence = 0
+    tracer.Segments = 1
+    tracer.Enabled = false
+    tracer.Parent = ensureTracerFolder()
+
+    v = {
+        highlights = {},
+        highlightCharacter = nil,
+        billboard = billboard,
+        label = label,
+        tracer = tracer,
+        tracerAttachment = nil,
+        tracerCharacter = nil,
+        chams = nil,
+        chamsCharacter = nil,
     }
-
-    esp.Box.Thickness = 1
-    esp.Box.Filled = false
-    esp.Box.Color = ESP.Config.Color
-    esp.Box.Visible = false
-
-    esp.BoxOutline.Thickness = 3
-    esp.BoxOutline.Filled = false
-    esp.BoxOutline.Color = Color3.new(0, 0, 0)
-    esp.BoxOutline.Visible = false
-
-    esp.Name.Size = 14
-    esp.Name.Center = true
-    esp.Name.Outline = true
-    esp.Name.Color = ESP.Config.Color
-    esp.Name.Visible = false
-
-    esp.HealthBar.Filled = true
-    esp.HealthBar.Visible = false
-
-    esp.HealthBarOutline.Filled = true
-    esp.HealthBarOutline.Color = Color3.new(0, 0, 0)
-    esp.HealthBarOutline.Visible = false
-
-    esp.HealthText.Size = 12
-    esp.HealthText.Center = true
-    esp.HealthText.Outline = true
-    esp.HealthText.Visible = false
-
-    esp.Distance.Size = 12
-    esp.Distance.Center = true
-    esp.Distance.Outline = true
-    esp.Distance.Color = ESP.Config.Color
-    esp.Distance.Visible = false
-
-    esp.Weapon.Size = 12
-    esp.Weapon.Center = true
-    esp.Weapon.Outline = true
-    esp.Weapon.Color = ESP.Config.Color
-    esp.Weapon.Visible = false
-
-    ESPObjects[player] = esp
-
-    if not Highlights[player] then
-        local hl = Instance.new("Highlight")
-        hl.Name = "ESPChams"
-        hl.FillColor = ESP.Config.Color
-        hl.OutlineColor = ESP.Config.Color
-        hl.FillTransparency = 0.5
-        hl.OutlineTransparency = 0
-        hl.Enabled = false
-        Highlights[player] = hl
-    end
-
-    return esp
+    Visuals[player] = v
+    return v
 end
 
-local function RemoveESP(player)
-    local esp = ESPObjects[player]
-    if esp then
-        HideESP(esp)
-        for _, key in ipairs({"Box", "BoxOutline", "Name", "HealthBar", "HealthBarOutline", "HealthText", "Distance", "Weapon"}) do
-            local drawing = esp[key]
-            if drawing then
-                pcall(function()
-                    drawing:Remove()
-                end)
+local function syncBodyHighlights(v, character, enabled)
+    if v.highlightCharacter ~= character then
+        for _, hl in pairs(v.highlights) do pcall(function() hl:Destroy() end) end
+        v.highlights = {}
+        v.highlightCharacter = character
+        if character then
+            local gui = ensureGui()
+            for _, part in ipairs(character:GetChildren()) do
+                if part:IsA("BasePart") and BODY_PARTS[part.Name] then
+                    local hl = Instance.new("Highlight")
+                    hl.Name = "ENI_Body_" .. part.Name
+                    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    hl.FillColor = ESP.Config.Color
+                    hl.FillTransparency = 0.85
+                    hl.OutlineColor = ESP.Config.Color
+                    hl.OutlineTransparency = 0
+                    hl.Adornee = part
+                    hl.Enabled = false
+                    hl.Parent = gui
+                    v.highlights[part] = hl
+                end
             end
         end
-        ESPObjects[player] = nil
     end
-    local hl = Highlights[player]
-    if hl then hl:Destroy() Highlights[player] = nil end
+    for part, hl in pairs(v.highlights) do
+        if not part.Parent then
+            pcall(function() hl:Destroy() end)
+            v.highlights[part] = nil
+        else
+            hl.Enabled = enabled == true
+        end
+    end
 end
 
-local function UpdateESP()
-    for player in pairs(ESPObjects) do
-        if player.Parent ~= Players then RemoveESP(player) end
+local function syncChams(v, character, enabled)
+    if v.chamsCharacter ~= character then
+        if v.chams then pcall(function() v.chams:Destroy() end) v.chams = nil end
+        v.chamsCharacter = character
+        if character then
+            local hl = Instance.new("Highlight")
+            hl.Name = "ENI_Chams"
+            hl.DepthMode = Enum.HighlightDepthMode.Occluded
+            hl.FillColor = ESP.Config.Color
+            hl.FillTransparency = 0.45
+            hl.OutlineColor = ESP.Config.Color
+            hl.OutlineTransparency = 1
+            hl.Adornee = character
+            hl.Enabled = false
+            hl.Parent = ensureGui()
+            v.chams = hl
+        end
     end
-    for player in pairs(Highlights) do
-        if player.Parent ~= Players then RemoveESP(player) end
+    if v.chams then v.chams.Enabled = enabled == true end
+end
+
+--// ── main loop ──────────────────────────────────────────────────
+local function step()
+    local cfg = ESP.Config
+
+    for player in pairs(Visuals) do
+        if player.Parent ~= Players then destroyVisual(player) end
     end
 
-    if not ESP.Config.Enabled then
-        HideAllESP()
-        HideAllChams()
+    if not cfg.Enabled then
+        for _, v in pairs(Visuals) do hideVisual(v) end
         return
     end
 
-    for player, esp in pairs(ESPObjects) do
-        local character = player.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    local cam = Workspace.CurrentCamera
+    if not cam then return end
 
-        if character and humanoid and rootPart and humanoid.Health > 0 then
-            local showESP = true
-            if ESP.Config.TeamCheck and player.Team == LocalPlayer.Team then showESP = false end
-            local distance = (rootPart.Position - Workspace.CurrentCamera.CFrame.Position).Magnitude
-            if distance > ESP.Config.RenderDistance then showESP = false end
-
-            if showESP then
-                local pos, onScreen = Workspace.CurrentCamera:WorldToViewportPoint(rootPart.Position)
-                if onScreen then
-                    local height = (Workspace.CurrentCamera:WorldToViewportPoint(rootPart.Position - Vector3.new(0, 3, 0)).Y - Workspace.CurrentCamera:WorldToViewportPoint(rootPart.Position + Vector3.new(0, 3, 0)).Y)
-                    local width = height / 2
-
-                    if ESP.Config.Boxes then
-                        esp.Box.Size = Vector2.new(width, height)
-                        esp.Box.Position = Vector2.new(pos.X - width / 2, pos.Y - height / 2)
-                        esp.Box.Color = ESP.Config.Color
-                        esp.Box.Visible = true
-                        esp.BoxOutline.Size = Vector2.new(width, height)
-                        esp.BoxOutline.Position = Vector2.new(pos.X - width / 2, pos.Y - height / 2)
-                        esp.BoxOutline.Visible = true
-                    else
-                        esp.Box.Visible = false
-                        esp.BoxOutline.Visible = false
-                    end
-
-                    if ESP.Config.Names then
-                        esp.Name.Text = player.Name
-                        esp.Name.Position = Vector2.new(pos.X, pos.Y - height / 2 - 15)
-                        esp.Name.Color = ESP.Config.Color
-                        esp.Name.Visible = true
-                    else esp.Name.Visible = false end
-
-                    if ESP.Config.Health then
-                        local healthPercent = humanoid.Health / humanoid.MaxHealth
-                        local barHeight = height * healthPercent
-                        esp.HealthBar.Size = Vector2.new(4, barHeight)
-                        esp.HealthBar.Position = Vector2.new(pos.X - width / 2 - 6, pos.Y + height / 2 - barHeight)
-                        esp.HealthBar.Color = Color3.fromRGB(255 * (1 - healthPercent), 255 * healthPercent, 0)
-                        esp.HealthBar.Visible = true
-                        esp.HealthBarOutline.Size = Vector2.new(6, height)
-                        esp.HealthBarOutline.Position = Vector2.new(pos.X - width / 2 - 7, pos.Y - height / 2)
-                        esp.HealthBarOutline.Visible = true
-                        esp.HealthText.Text = tostring(math.floor(humanoid.Health))
-                        esp.HealthText.Position = Vector2.new(pos.X - width / 2 - 20, pos.Y)
-                        esp.HealthText.Color = esp.HealthBar.Color
-                        esp.HealthText.Visible = true
-                    else
-                        esp.HealthBar.Visible = false
-                        esp.HealthBarOutline.Visible = false
-                        esp.HealthText.Visible = false
-                    end
-
-                    if ESP.Config.Distance then
-                        esp.Distance.Text = math.floor(distance) .. "m"
-                        esp.Distance.Position = Vector2.new(pos.X, pos.Y + height / 2 + 5)
-                        esp.Distance.Color = ESP.Config.Color
-                        esp.Distance.Visible = true
-                    else esp.Distance.Visible = false end
-
-                    if ESP.Config.Weapon then
-                        local tool = character:FindFirstChildOfClass("Tool")
-                        esp.Weapon.Text = tool and tool.Name or "None"
-                        esp.Weapon.Position = Vector2.new(pos.X, pos.Y + height / 2 + 20)
-                        esp.Weapon.Color = ESP.Config.Color
-                        esp.Weapon.Visible = true
-                    else esp.Weapon.Visible = false end
-                else
-                    esp.Box.Visible = false
-                    esp.BoxOutline.Visible = false
-                    esp.Name.Visible = false
-                    esp.HealthBar.Visible = false
-                    esp.HealthBarOutline.Visible = false
-                    esp.HealthText.Visible = false
-                    esp.Distance.Visible = false
-                    esp.Weapon.Visible = false
-                end
-            else
-                esp.Box.Visible = false
-                esp.BoxOutline.Visible = false
-                esp.Name.Visible = false
-                esp.HealthBar.Visible = false
-                esp.HealthBarOutline.Visible = false
-                esp.HealthText.Visible = false
-                esp.Distance.Visible = false
-                esp.Weapon.Visible = false
-            end
-        else
-            esp.Box.Visible = false
-            esp.BoxOutline.Visible = false
-            esp.Name.Visible = false
-            esp.HealthBar.Visible = false
-            esp.HealthBarOutline.Visible = false
-            esp.HealthText.Visible = false
-            esp.Distance.Visible = false
-            esp.Weapon.Visible = false
-        end
+    local localChar = LocalPlayer.Character
+    local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
+    local camPos = cam.CFrame.Position
+    local sourceAttachment = nil
+    if cfg.Tracers and localChar and localRoot then
+        sourceAttachment = ensureSourceAttachment(localChar)
+    elseif not cfg.Tracers then
+        clearSourceAttachment()
     end
 
-    for player, hl in pairs(Highlights) do
-        local character = player.Character
-        local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-        local showChams = false
-        if character and humanoid and humanoid.Health > 0 and ESP.Config.Chams and ESP.Config.Enabled then
-            if not ESP.Config.TeamCheck or player.Team ~= LocalPlayer.Team then
-                local rootPart = character:FindFirstChild("HumanoidRootPart")
-                if rootPart then
-                    local distance = (rootPart.Position - Workspace.CurrentCamera.CFrame.Position).Magnitude
-                    if distance <= ESP.Config.RenderDistance then
-                        showChams = true
-                        hl.Parent = character
-                    end
+    local hex = colorHex(cfg.Color)
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local v = createVisual(player)
+            local character = player.Character
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+            local head = character and character:FindFirstChild("Head")
+            local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+
+            local alive = root and head and humanoid and humanoid.Health > 0
+            local sameTeam = cfg.TeamCheck and player.Team == LocalPlayer.Team
+            local studs = (alive and localRoot)
+                and (root.Position - localRoot.Position).Magnitude or math.huge
+            local ready = alive and not sameTeam and studs <= cfg.RenderDistance
+
+            syncBodyHighlights(v, character, ready and cfg.Boxes)
+            syncChams(v, character, ready and cfg.Chams)
+            v.billboard.Adornee = ready and head or nil
+
+            if ready then
+                local meters = studs * METERS_PER_STUD
+                local lines = {}
+                if cfg.Names then
+                    lines[#lines + 1] = '<font color="' .. hex .. '"><b>'
+                        .. escapeRichText(player.DisplayName) .. '</b></font>'
                 end
+                if cfg.Health then
+                    local cur = math.max(0, humanoid.Health)
+                    local max = math.max(1, humanoid.MaxHealth)
+                    local ratio = math.clamp(cur / max, 0, 1)
+                    lines[#lines + 1] = '<font color="#AEB9C2">HP </font>'
+                        .. '<font color="' .. healthColor(ratio) .. '"><b>'
+                        .. math.floor(cur + 0.5) .. '</b></font>'
+                        .. '<font color="#AEB9C2">/</font>'
+                        .. '<font color="#55DDFF"><b>' .. math.floor(max + 0.5) .. '</b></font>'
+                end
+                if cfg.Weapon then
+                    local tool = character:FindFirstChildOfClass("Tool")
+                    lines[#lines + 1] = '<font color="#E7EDF2">'
+                        .. escapeRichText(tool and tool.Name or "None") .. '</font>'
+                end
+                if cfg.Distance and meters >= 10 then
+                    lines[#lines + 1] = '<font color="#E7EDF2">' .. formatMeters(meters) .. '</font>'
+                end
+
+                v.label.Text = table.concat(lines, "\n")
+                v.label.TextColor3 = cfg.Color
+                v.billboard.Enabled = #lines > 0
+
+                if v.tracerCharacter ~= character
+                    or not v.tracerAttachment
+                    or not v.tracerAttachment.Parent then
+                    if v.tracerAttachment then
+                        pcall(function() v.tracerAttachment:Destroy() end)
+                    end
+                    v.tracerAttachment = createChestAttachment(character, "ENI_TracerTarget")
+                    v.tracerCharacter = character
+                end
+
+                if cfg.Tracers and meters >= 10 and sourceAttachment and v.tracerAttachment then
+                    v.tracer.Color = ColorSequence.new(cfg.Color)
+                    v.tracer.Attachment0 = sourceAttachment
+                    v.tracer.Attachment1 = v.tracerAttachment
+                    v.tracer.Enabled = true
+                else
+                    v.tracer.Enabled = false
+                end
+            else
+                v.billboard.Enabled = false
+                v.tracer.Enabled = false
             end
-        end
-        hl.Enabled = showChams
-        if showChams then
-            hl.FillColor = ESP.Config.Color
-            hl.OutlineColor = ESP.Config.Color
-        else
-            hl.Parent = nil
         end
     end
 end
 
-RunService.RenderStepped:Connect(UpdateESP)
+RunService.RenderStepped:Connect(step)
 
-for _, player in ipairs(Players:GetPlayers()) do if player ~= LocalPlayer then CreateESP(player) end end
-Players.PlayerAdded:Connect(function(p) task.wait(1) if p.Parent == Players then CreateESP(p) end end)
-Players.PlayerRemoving:Connect(RemoveESP)
+Players.PlayerRemoving:Connect(destroyVisual)
 
--- Other modules (e.g. kill all) should use this to skip players who left or are dead
+--// ── public API (used by combat.lua kill all) ───────────────────
 function ESP.IsValidPlayer(player)
     if not player or player == LocalPlayer or player.Parent ~= Players then return false end
     local character = player.Character
     if not character or not character:IsDescendantOf(Workspace) then return false end
     local humanoid = character:FindFirstChildOfClass("Humanoid")
-    return humanoid ~= nil and humanoid.Health > 0 and character:FindFirstChild("HumanoidRootPart") ~= nil
+    return humanoid ~= nil and humanoid.Health > 0
+        and character:FindFirstChild("HumanoidRootPart") ~= nil
 end
 
 function ESP.GetValidPlayers()
@@ -304,6 +394,22 @@ function ESP.GetValidPlayers()
     return list
 end
 
+function ESP.SetColor(c)
+    ESP.Config.Color = c
+    for _, v in pairs(Visuals) do
+        v.tracer.Color = ColorSequence.new(c)
+        v.label.TextColor3 = c
+        if v.chams then
+            v.chams.FillColor = c
+            v.chams.OutlineColor = c
+        end
+        for _, hl in pairs(v.highlights) do
+            hl.FillColor = c
+            hl.OutlineColor = c
+        end
+    end
+end
+
 function ESP:Init(Gui)
     self.Gui = Gui
     Gui:SetTabRebuild("Visuals", function(g)
@@ -312,27 +418,27 @@ function ESP:Init(Gui)
         g.Content = scroll
 
         local y = g:CreateSection("ESP", 0)
-        y = g:CreateToggle("Enabled", false, function(s)
+        y = g:CreateToggle("Enabled", ESP.Config.Enabled, function(s)
             ESP.Config.Enabled = s
-            if not s then HideAllESP() HideAllChams() end
+            if not s then clearAll() end
         end, y)
-        y = g:CreateToggle("Boxes", false, function(s) ESP.Config.Boxes = s end, y)
-        y = g:CreateToggle("Names", false, function(s) ESP.Config.Names = s end, y)
-        y = g:CreateToggle("Health", false, function(s) ESP.Config.Health = s end, y)
-        y = g:CreateToggle("Distance", false, function(s) ESP.Config.Distance = s end, y)
-        y = g:CreateToggle("Weapon", false, function(s) ESP.Config.Weapon = s end, y)
-        y = g:CreateToggle("Chams", false, function(s)
-            ESP.Config.Chams = s
-            if not s then HideAllChams() end
+        y = g:CreateToggle("Boxes", ESP.Config.Boxes, function(s) ESP.Config.Boxes = s end, y)
+        y = g:CreateToggle("Chams", ESP.Config.Chams, function(s) ESP.Config.Chams = s end, y)
+        y = g:CreateToggle("Names", ESP.Config.Names, function(s) ESP.Config.Names = s end, y)
+        y = g:CreateToggle("Health", ESP.Config.Health, function(s) ESP.Config.Health = s end, y)
+        y = g:CreateToggle("Weapon", ESP.Config.Weapon, function(s) ESP.Config.Weapon = s end, y)
+        y = g:CreateToggle("Distance", ESP.Config.Distance, function(s) ESP.Config.Distance = s end, y)
+        y = g:CreateToggle("Tracers", ESP.Config.Tracers, function(s)
+            ESP.Config.Tracers = s
+            if not s then clearSourceAttachment() end
         end, y)
-        y = g:CreateToggle("Team Check", true, function(s) ESP.Config.TeamCheck = s end, y)
-        y = g:CreateSlider("Render Distance", 10, 2500, 1000, function(v) ESP.Config.RenderDistance = v end, y)
+        y = g:CreateToggle("Team Check", ESP.Config.TeamCheck, function(s) ESP.Config.TeamCheck = s end, y)
+        y = g:CreateSlider("Render Distance", 10, 2500, ESP.Config.RenderDistance, function(v)
+            ESP.Config.RenderDistance = v
+        end, y)
 
-        -- Color wheel instead of preset buttons
         y = g:CreateSection("ESP Color", y + 10)
-        y = g:CreateColorPicker("Color", ESP.Config.Color, function(c)
-            ESP.Config.Color = c
-        end, y)
+        y = g:CreateColorPicker("Color", ESP.Config.Color, function(c) ESP.SetColor(c) end, y)
 
         g.Content = originalContent
     end)
