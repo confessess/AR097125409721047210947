@@ -28,6 +28,9 @@ GunMods.Config = {
     ChamArms = false,
     ArmsColor = Color3.fromRGB(19, 0, 255),
     ArmsTransparency = 0.5,
+
+    MuzzleBlock = false,
+    MuzzleHideMesh = false,
 }
 
 -- Gun mods state tracking
@@ -206,6 +209,155 @@ local function SetupCharacter(char)
 end
 
 --// ═══════════════════════════════════════════════════════════════
+--//  MUZZLE FLASH BLOCK
+--//  Flash lives at Workspace.HWRAP_<build>.Gun.Flash.P_ThirdPerson.Muzzle
+--//  Wrapper name is build-specific so matching is structural.
+--//  Emitters are neutralised three ways: Enabled off, Rate 0, Lifetime 0,0.
+--//  Lifetime matters because :Emit() fires particles even while disabled.
+--// ═══════════════════════════════════════════════════════════════
+
+local MuzzleBlock = {
+    Active = false,
+    AddedConn = nil,
+    Heartbeat = nil,
+    Locked = {},
+    Names = { Muzzle = true, MuzzleFlash = true, MuzzleFlash2 = true },
+}
+
+local function UnderFlashPart(inst)
+    local p = inst.Parent
+    local depth = 0
+    while p and p ~= Workspace and depth < 6 do
+        if p.Name == "Flash" or p.Name == "MuzzleFlash" then return true end
+        p = p.Parent
+        depth = depth + 1
+    end
+    return false
+end
+
+local function IsFlashEmitter(inst)
+    return MuzzleBlock.Names[inst.Name] == true or UnderFlashPart(inst)
+end
+
+local function LockParticle(pe)
+    if MuzzleBlock.Locked[pe] then return end
+    local entry = {
+        restore = { Enabled = pe.Enabled, Rate = pe.Rate, Lifetime = pe.Lifetime },
+        conns = {},
+    }
+    MuzzleBlock.Locked[pe] = entry
+
+    pe.Enabled = false
+    pe.Rate = 0
+    pe.Lifetime = NumberRange.new(0, 0)
+
+    entry.conns[#entry.conns + 1] = pe:GetPropertyChangedSignal("Enabled"):Connect(function()
+        if pe.Enabled then pe.Enabled = false end
+    end)
+    entry.conns[#entry.conns + 1] = pe:GetPropertyChangedSignal("Rate"):Connect(function()
+        if pe.Rate ~= 0 then pe.Rate = 0 end
+    end)
+    entry.conns[#entry.conns + 1] = pe:GetPropertyChangedSignal("Lifetime"):Connect(function()
+        if pe.Lifetime.Min ~= 0 or pe.Lifetime.Max ~= 0 then
+            pe.Lifetime = NumberRange.new(0, 0)
+        end
+    end)
+end
+
+local function LockLight(light)
+    if MuzzleBlock.Locked[light] then return end
+    local entry = {
+        restore = { Enabled = light.Enabled, Brightness = light.Brightness },
+        conns = {},
+    }
+    MuzzleBlock.Locked[light] = entry
+
+    light.Enabled = false
+    light.Brightness = 0
+
+    entry.conns[#entry.conns + 1] = light:GetPropertyChangedSignal("Enabled"):Connect(function()
+        if light.Enabled then light.Enabled = false end
+    end)
+end
+
+local function LockMesh(part)
+    if MuzzleBlock.Locked[part] then return end
+    MuzzleBlock.Locked[part] = {
+        restore = {
+            Transparency = part.Transparency,
+            LocalTransparencyModifier = part.LocalTransparencyModifier,
+        },
+        conns = {},
+    }
+    part.LocalTransparencyModifier = 1
+end
+
+local function MuzzleProcess(inst)
+    if not MuzzleBlock.Active then return end
+    if inst:IsA("ParticleEmitter") then
+        if IsFlashEmitter(inst) then LockParticle(inst) end
+    elseif inst:IsA("PointLight") or inst:IsA("SpotLight") then
+        if UnderFlashPart(inst) then LockLight(inst) end
+    elseif GunMods.Config.MuzzleHideMesh and inst:IsA("BasePart") then
+        if inst.Name == "Flash" or inst.Name == "MuzzleFlash" then LockMesh(inst) end
+    end
+end
+
+local function MuzzleSweep()
+    if not MuzzleBlock.Active then return end
+    for _, inst in ipairs(Workspace:GetDescendants()) do
+        MuzzleProcess(inst)
+    end
+end
+
+local function MuzzleEnable()
+    if MuzzleBlock.Active then return end
+    MuzzleBlock.Active = true
+
+    MuzzleSweep()
+    MuzzleBlock.AddedConn = Workspace.DescendantAdded:Connect(MuzzleProcess)
+
+    MuzzleBlock.Heartbeat = RunService.Heartbeat:Connect(function()
+        if not MuzzleBlock.Active then return end
+        for inst, entry in pairs(MuzzleBlock.Locked) do
+            if not inst.Parent then
+                for _, c in ipairs(entry.conns) do c:Disconnect() end
+                MuzzleBlock.Locked[inst] = nil
+            elseif inst:IsA("ParticleEmitter") then
+                if inst.Enabled then inst.Enabled = false end
+                if inst.Rate ~= 0 then inst.Rate = 0 end
+            elseif inst:IsA("Light") then
+                if inst.Enabled then inst.Enabled = false end
+            elseif inst:IsA("BasePart") and GunMods.Config.MuzzleHideMesh then
+                inst.LocalTransparencyModifier = 1
+            end
+        end
+    end)
+end
+
+local function MuzzleDisable()
+    if not MuzzleBlock.Active then return end
+    MuzzleBlock.Active = false
+
+    if MuzzleBlock.AddedConn then
+        MuzzleBlock.AddedConn:Disconnect()
+        MuzzleBlock.AddedConn = nil
+    end
+    if MuzzleBlock.Heartbeat then
+        MuzzleBlock.Heartbeat:Disconnect()
+        MuzzleBlock.Heartbeat = nil
+    end
+
+    for inst, entry in pairs(MuzzleBlock.Locked) do
+        for _, c in ipairs(entry.conns) do pcall(c.Disconnect, c) end
+        pcall(function()
+            for prop, value in pairs(entry.restore) do inst[prop] = value end
+        end)
+    end
+    MuzzleBlock.Locked = {}
+end
+
+--// ═══════════════════════════════════════════════════════════════
 --//  VIEWMODEL CHAMS — Arsenal Specific
 --//  Applies to the real viewmodel AND any clone, so the two systems
 --//  don't mask each other. Generation counter replaces the marker gate
@@ -278,7 +430,6 @@ local function SnapshotGunPart(part)
     end
 end
 
---// Snapshot arm parts before modifying
 local function SnapshotArmPart(part)
     if not part or Viewmodel.OriginalArmData[part] then return end
     if part:IsA("BasePart") then
@@ -559,6 +710,25 @@ function GunMods:Init(Gui)
             end
         end, y)
 
+        -- Muzzle flash
+        y = g:CreateSection("Muzzle Flash", y + 10)
+
+        y = g:CreateToggle("Block Muzzle Flash", false, function(state)
+            GunMods.Config.MuzzleBlock = state
+            if state then
+                MuzzleEnable()
+            else
+                MuzzleDisable()
+            end
+        end, y)
+
+        y = g:CreateToggle("Hide Flash Mesh", false, function(state)
+            GunMods.Config.MuzzleHideMesh = state
+            if state and GunMods.Config.MuzzleBlock then
+                MuzzleSweep()
+            end
+        end, y)
+
         -- Viewmodel Chams
         y = g:CreateSection("Viewmodel Chams", y + 10)
 
@@ -640,6 +810,7 @@ function GunMods:Init(Gui)
         if GunMods.Config.RapidFire then ModStates.RapidFire.Active = true ApplySingleMod("RapidFire") end
         if GunMods.Config.FastReload then ModStates.FastReload.Active = true ApplySingleMod("FastReload") end
         if GunMods.Config.InfiniteAmmo then ApplyInfiniteAmmo() end
+        if GunMods.Config.MuzzleBlock then MuzzleSweep() end
         if GunMods.Config.ChamsEnabled or GunMods.Config.ChamArms then
             task.wait(1)
             StartChamsLoop()
