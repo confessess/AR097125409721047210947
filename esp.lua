@@ -1,6 +1,6 @@
 --// ═══════════════════════════════════════════════════════════════
 --//  MODULE: esp.lua
---//  Highlight / Billboard / Beam ESP
+--//  Drawing boxes + material chams + Billboard labels + Beam tracers
 --// ═══════════════════════════════════════════════════════════════
 local ESP = {}
 ESP.__index = ESP
@@ -24,10 +24,12 @@ ESP.Config = {
     TeamCheck = true,
     RenderDistance = 1000,
     Color = Color3.fromRGB(255, 0, 45),
+    ChamsTransparency = 0,
+    ChamsMaterial = "ForceField",
 }
 
 local METERS_PER_STUD = 0.28
-local MAX_HIGHLIGHT_PLAYERS = 4
+local BOX_SLOTS = 6
 
 local Visuals = {}
 local TracerFolder = nil
@@ -41,9 +43,6 @@ local PART_ALIASES = {
     { "LeftUpperLeg", "LeftLeg" },
     { "RightUpperLeg", "RightLeg" },
 }
-
-local HEALTH_NAMES = { "Health", "HP", "HealthValue" }
-local MAX_HEALTH_NAMES = { "MaxHealth", "MaxHP" }
 
 --// ── helpers ────────────────────────────────────────────────────
 local function colorHex(c)
@@ -73,44 +72,22 @@ local function healthColor(ratio)
     return "#55DDFF"
 end
 
-local function findNumber(container, names)
-    if not container then return nil end
-    for _, name in ipairs(names) do
-        local v = container:FindFirstChild(name)
-        if v and v:IsA("ValueBase") and typeof(v.Value) == "number" then
-            return v.Value
+--// Arsenal stores live health on Player.NRPBS, not on the Humanoid
+local function readHealth(player, humanoid)
+    local folder = player:FindFirstChild("NRPBS")
+    if folder then
+        local cur = folder:FindFirstChild("Health")
+        if cur and cur:IsA("ValueBase") and typeof(cur.Value) == "number" then
+            local maxValue = folder:FindFirstChild("MaxHealth")
+                or folder:FindFirstChild("OMaxHealth")
+            local max = (maxValue and maxValue:IsA("ValueBase")
+                and typeof(maxValue.Value) == "number" and maxValue.Value) or 100
+            max = math.max(1, max)
+            return math.clamp(cur.Value, 0, max), max
         end
     end
-    return nil
-end
-
---// Arsenal keeps remote Humanoid.Health pinned and tracks damage on custom
---// values. Take the lowest number we can find so a stale 100 never wins.
-local function readHealth(player, character, humanoid)
-    local cur = humanoid.Health
     local max = math.max(1, humanoid.MaxHealth)
-
-    local containers = {
-        character:FindFirstChild("Status"),
-        character,
-        player:FindFirstChild("ScoreFolder"),
-        player,
-    }
-
-    for _, container in ipairs(containers) do
-        if container then
-            local value = findNumber(container, HEALTH_NAMES)
-            if value then
-                if value < cur then cur = value end
-                local mx = findNumber(container, MAX_HEALTH_NAMES)
-                if mx and mx > 0 then max = mx end
-                break
-            end
-        end
-    end
-
-    cur = math.clamp(cur, 0, max)
-    return cur, max
+    return math.clamp(humanoid.Health, 0, max), max
 end
 
 local function ensureGui()
@@ -179,6 +156,16 @@ local function clearSourceAttachment()
 end
 
 --// ── object lifecycle ───────────────────────────────────────────
+local function newSquare(filled)
+    local d = Drawing.new("Square")
+    d.Filled = filled
+    d.Thickness = 1
+    d.Transparency = 1
+    d.Color = ESP.Config.Color
+    d.Visible = false
+    return d
+end
+
 local function destroyVisual(player)
     local v = Visuals[player]
     if not v then return end
@@ -186,7 +173,8 @@ local function destroyVisual(player)
     if v.billboard then pcall(function() v.billboard:Destroy() end) end
     if v.tracer then pcall(function() v.tracer:Destroy() end) end
     if v.tracerAttachment then pcall(function() v.tracerAttachment:Destroy() end) end
-    for _, hl in pairs(v.highlights or {}) do pcall(function() hl:Destroy() end) end
+    for _, d in pairs(v.boxes or {}) do pcall(function() d:Remove() end) end
+    for _, d in pairs(v.fills or {}) do pcall(function() d:Remove() end) end
 end
 
 local function clearAll()
@@ -197,7 +185,8 @@ end
 local function hideVisual(v)
     if v.billboard then v.billboard.Enabled = false; v.billboard.Adornee = nil end
     if v.tracer then v.tracer.Enabled = false end
-    for _, hl in pairs(v.highlights or {}) do hl.Enabled = false end
+    for _, d in pairs(v.boxes or {}) do d.Visible = false end
+    for _, d in pairs(v.fills or {}) do d.Visible = false end
 end
 
 local function createVisual(player)
@@ -242,20 +231,25 @@ local function createVisual(player)
     tracer.Parent = ensureTracerFolder()
 
     v = {
-        highlights = {},
-        highlightCharacter = nil,
-        modeKey = nil,
+        boxes = {},
+        fills = {},
+        chamData = {},
+        chamCharacter = nil,
         billboard = billboard,
         label = label,
         tracer = tracer,
         tracerAttachment = nil,
         tracerCharacter = nil,
     }
+    for i = 1, BOX_SLOTS do
+        v.boxes[i] = newSquare(false)
+        v.fills[i] = newSquare(true)
+    end
     Visuals[player] = v
     return v
 end
 
---// ── highlights (boxes + chams share one set) ───────────────────
+--// ── parts + screen projection ──────────────────────────────────
 local function resolveParts(character)
     local parts = {}
     for _, alias in ipairs(PART_ALIASES) do
@@ -270,67 +264,84 @@ local function resolveParts(character)
     return parts
 end
 
-local function applyHighlightStyle(v, boxes, chams)
-    local key = (boxes and "b" or "") .. (chams and "c" or "")
-    if v.modeKey == key then return end
-    v.modeKey = key
+--// projects the 8 corners of a part and returns its screen rect
+local function partScreenRect(part, cam)
+    local cf = part.CFrame
+    local half = part.Size * 0.5
+    local minX, minY = math.huge, math.huge
+    local maxX, maxY = -math.huge, -math.huge
 
-    local fill, outline
-    if boxes and chams then
-        fill, outline = 0.45, 0
-    elseif boxes then
-        fill, outline = 0.9, 0
-    else
-        fill, outline = 0.4, 1
-    end
-
-    local col = ESP.Config.Color
-    for _, hl in pairs(v.highlights) do
-        hl.FillColor = col
-        hl.OutlineColor = col
-        hl.FillTransparency = fill
-        hl.OutlineTransparency = outline
-    end
-end
-
-local function syncHighlights(v, character, enabled, boxes, chams)
-    if v.highlightCharacter ~= character then
-        for _, hl in pairs(v.highlights) do pcall(function() hl:Destroy() end) end
-        v.highlights = {}
-        v.highlightCharacter = character
-        v.modeKey = nil
-
-        if character then
-            for _, part in ipairs(resolveParts(character)) do
-                local hl = Instance.new("Highlight")
-                hl.Name = "ENI_Body_" .. part.Name
-                hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                hl.FillColor = ESP.Config.Color
-                hl.OutlineColor = ESP.Config.Color
-                hl.FillTransparency = 0.5
-                hl.OutlineTransparency = 0
-                hl.Enabled = false
-                hl.Parent = part
-                hl.Adornee = part
-                v.highlights[part] = hl
+    for xi = -1, 1, 2 do
+        for yi = -1, 1, 2 do
+            for zi = -1, 1, 2 do
+                local world = cf * Vector3.new(half.X * xi, half.Y * yi, half.Z * zi)
+                local sp, onScreen = cam:WorldToViewportPoint(world)
+                if sp.Z <= 0 then return nil end
+                if sp.X < minX then minX = sp.X end
+                if sp.X > maxX then maxX = sp.X end
+                if sp.Y < minY then minY = sp.Y end
+                if sp.Y > maxY then maxY = sp.Y end
+                _ = onScreen
             end
         end
     end
 
-    if not enabled then
-        for _, hl in pairs(v.highlights) do hl.Enabled = false end
+    local w, h = maxX - minX, maxY - minY
+    if w < 1 or h < 1 then return nil end
+    return Vector2.new(minX, minY), Vector2.new(w, h)
+end
+
+--// ── chams (material override) ──────────────────────────────────
+local function clearChams(v)
+    for part, data in pairs(v.chamData) do
+        if part and part.Parent then
+            pcall(function()
+                part.Material = data.Material
+                part.Color = data.Color
+                part.Transparency = data.Transparency
+                part.LocalTransparencyModifier = data.LocalTransparencyModifier
+            end)
+        end
+    end
+    v.chamData = {}
+    v.chamCharacter = nil
+end
+
+local function syncChams(v, character, enabled)
+    if v.chamCharacter ~= character then
+        clearChams(v)
+        if enabled and character then
+            v.chamCharacter = character
+            local mat = Enum.Material[ESP.Config.ChamsMaterial] or Enum.Material.ForceField
+            for _, part in ipairs(resolveParts(character)) do
+                v.chamData[part] = {
+                    Material = part.Material,
+                    Color = part.Color,
+                    Transparency = part.Transparency,
+                    LocalTransparencyModifier = part.LocalTransparencyModifier,
+                }
+                part.Material = mat
+                part.Color = ESP.Config.Color
+                part.Transparency = ESP.Config.ChamsTransparency
+                part.LocalTransparencyModifier = ESP.Config.ChamsTransparency
+            end
+        end
         return
     end
 
-    applyHighlightStyle(v, boxes, chams)
+    if not enabled then
+        if next(v.chamData) then clearChams(v) end
+        return
+    end
 
-    for part, hl in pairs(v.highlights) do
-        if not part.Parent then
-            pcall(function() hl:Destroy() end)
-            v.highlights[part] = nil
+    --// re-assert, the game rewrites materials on respawn/cosmetic changes
+    local mat = Enum.Material[ESP.Config.ChamsMaterial] or Enum.Material.ForceField
+    for part in pairs(v.chamData) do
+        if part.Parent then
+            if part.Material ~= mat then part.Material = mat end
+            if part.Color ~= ESP.Config.Color then part.Color = ESP.Config.Color end
         else
-            if hl.Adornee ~= part then hl.Adornee = part end
-            if not hl.Enabled then hl.Enabled = true end
+            v.chamData[part] = nil
         end
     end
 end
@@ -361,10 +372,10 @@ local function step()
     end
 
     local hex = colorHex(cfg.Color)
-    local candidates = {}
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
+            local v = createVisual(player)
             local character = player.Character
             local root = character and character:FindFirstChild("HumanoidRootPart")
             local head = character and character:FindFirstChild("Head")
@@ -378,84 +389,89 @@ local function step()
                 and (root.Position - localRoot.Position).Magnitude or math.huge
             local ready = alive and not sameTeam and studs <= cfg.RenderDistance
 
-            candidates[#candidates + 1] = {
-                player = player,
-                character = character,
-                head = head,
-                humanoid = humanoid,
-                studs = studs,
-                ready = ready,
-            }
-        end
-    end
+            --// boxes + fill
+            local parts = (ready and (cfg.Boxes or cfg.Chams)) and resolveParts(character) or {}
+            for i = 1, BOX_SLOTS do
+                local box, fill = v.boxes[i], v.fills[i]
+                local part = parts[i]
+                local rect, size = nil, nil
+                if part then rect, size = partScreenRect(part, cam) end
 
-    table.sort(candidates, function(a, b) return a.studs < b.studs end)
-
-    local highlightBudget = MAX_HIGHLIGHT_PLAYERS
-
-    for _, c in ipairs(candidates) do
-        local v = createVisual(c.player)
-        local ready = c.ready
-        local highlightOn = false
-
-        if ready and (cfg.Boxes or cfg.Chams) and highlightBudget > 0 then
-            highlightBudget = highlightBudget - 1
-            highlightOn = true
-        end
-
-        syncHighlights(v, c.character, highlightOn, cfg.Boxes, cfg.Chams)
-        v.billboard.Adornee = (ready and c.head) or nil
-
-        if ready then
-            local meters = c.studs * METERS_PER_STUD
-            local lines = {}
-            if cfg.Names then
-                lines[#lines + 1] = '<font color="' .. hex .. '"><b>'
-                    .. escapeRichText(c.player.DisplayName) .. '</b></font>'
-            end
-            if cfg.Health then
-                local cur, max = readHealth(c.player, c.character, c.humanoid)
-                local ratio = math.clamp(cur / max, 0, 1)
-                lines[#lines + 1] = '<font color="#AEB9C2">HP </font>'
-                    .. '<font color="' .. healthColor(ratio) .. '"><b>'
-                    .. math.floor(cur + 0.5) .. '</b></font>'
-                    .. '<font color="#AEB9C2">/</font>'
-                    .. '<font color="#55DDFF"><b>' .. math.floor(max + 0.5) .. '</b></font>'
-            end
-            if cfg.Weapon then
-                local tool = c.character:FindFirstChildOfClass("Tool")
-                lines[#lines + 1] = '<font color="#E7EDF2">'
-                    .. escapeRichText(tool and tool.Name or "None") .. '</font>'
-            end
-            if cfg.Distance and meters >= 10 then
-                lines[#lines + 1] = '<font color="#E7EDF2">' .. formatMeters(meters) .. '</font>'
-            end
-
-            v.label.Text = table.concat(lines, "\n")
-            v.label.TextColor3 = cfg.Color
-            v.billboard.Enabled = #lines > 0
-
-            if v.tracerCharacter ~= c.character
-                or not v.tracerAttachment
-                or not v.tracerAttachment.Parent then
-                if v.tracerAttachment then
-                    pcall(function() v.tracerAttachment:Destroy() end)
+                if rect and cfg.Boxes then
+                    box.Position = rect
+                    box.Size = size
+                    box.Color = cfg.Color
+                    box.Visible = true
+                else
+                    box.Visible = false
                 end
-                v.tracerAttachment = createChestAttachment(c.character, "ENI_TracerTarget")
-                v.tracerCharacter = c.character
+
+                if rect and cfg.Chams then
+                    fill.Position = rect
+                    fill.Size = size
+                    fill.Color = cfg.Color
+                    fill.Transparency = 0.55
+                    fill.Visible = true
+                else
+                    fill.Visible = false
+                end
             end
 
-            if cfg.Tracers and meters >= 10 and sourceAttachment and v.tracerAttachment then
-                v.tracer.Color = ColorSequence.new(cfg.Color)
-                v.tracer.Attachment0 = sourceAttachment
-                v.tracer.Attachment1 = v.tracerAttachment
-                v.tracer.Enabled = true
+            syncChams(v, character, ready and cfg.Chams)
+
+            v.billboard.Adornee = (ready and head) or nil
+
+            if ready then
+                local meters = studs * METERS_PER_STUD
+                local lines = {}
+                if cfg.Names then
+                    lines[#lines + 1] = '<font color="' .. hex .. '"><b>'
+                        .. escapeRichText(player.DisplayName) .. '</b></font>'
+                end
+                if cfg.Health then
+                    local cur, max = readHealth(player, humanoid)
+                    local ratio = math.clamp(cur / max, 0, 1)
+                    lines[#lines + 1] = '<font color="#AEB9C2">HP </font>'
+                        .. '<font color="' .. healthColor(ratio) .. '"><b>'
+                        .. math.floor(cur + 0.5) .. '</b></font>'
+                        .. '<font color="#AEB9C2">/</font>'
+                        .. '<font color="#55DDFF"><b>' .. math.floor(max + 0.5) .. '</b></font>'
+                end
+                if cfg.Weapon then
+                    local tool = character:FindFirstChildOfClass("Tool")
+                    lines[#lines + 1] = '<font color="#E7EDF2">'
+                        .. escapeRichText(tool and tool.Name or "None") .. '</font>'
+                end
+                if cfg.Distance and meters >= 10 then
+                    lines[#lines + 1] = '<font color="#E7EDF2">' .. formatMeters(meters) .. '</font>'
+                end
+
+                v.label.Text = table.concat(lines, "\n")
+                v.label.TextColor3 = cfg.Color
+                v.billboard.Enabled = #lines > 0
+
+                if v.tracerCharacter ~= character
+                    or not v.tracerAttachment
+                    or not v.tracerAttachment.Parent then
+                    if v.tracerAttachment then
+                        pcall(function() v.tracerAttachment:Destroy() end)
+                    end
+                    v.tracerAttachment = createChestAttachment(character, "ENI_TracerTarget")
+                    v.tracerCharacter = character
+                end
+
+                if cfg.Tracers and meters >= 10 and sourceAttachment and v.tracerAttachment then
+                    v.tracer.Color = ColorSequence.new(cfg.Color)
+                    v.tracer.Attachment0 = sourceAttachment
+                    v.tracer.Attachment1 = v.tracerAttachment
+                    v.tracer.Enabled = true
+                else
+                    v.tracer.Enabled = false
+                end
             else
+                v.billboard.Enabled = false
                 v.tracer.Enabled = false
             end
-        else
-            v.billboard.Enabled = false
-            v.tracer.Enabled = false
         end
     end
 end
@@ -487,10 +503,8 @@ function ESP.SetColor(c)
     for _, v in pairs(Visuals) do
         v.tracer.Color = ColorSequence.new(c)
         v.label.TextColor3 = c
-        for _, hl in pairs(v.highlights) do
-            hl.FillColor = c
-            hl.OutlineColor = c
-        end
+        for _, d in pairs(v.boxes) do d.Color = c end
+        for _, d in pairs(v.fills) do d.Color = c end
     end
 end
 
