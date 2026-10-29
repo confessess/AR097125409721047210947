@@ -23,8 +23,36 @@ local LIGHT      = Color3.fromRGB(225, 225, 225)
 local GRAY       = Color3.fromRGB(150, 150, 150)
 local BORDER     = Color3.fromRGB(65, 25, 27)
 
+--// Per-module accent colors
+local ACCENTS = {
+    Combat           = Color3.fromRGB(200, 32, 40),
+    Visuals          = Color3.fromRGB(0, 200, 255),
+    Weapon           = Color3.fromRGB(255, 140, 20),
+    Movement         = Color3.fromRGB(60, 220, 110),
+    ["Skin Changer"] = Color3.fromRGB(175, 90, 255),
+    World            = Color3.fromRGB(240, 200, 60),
+    Viewmodel        = Color3.fromRGB(255, 90, 180),
+    Settings         = Color3.fromRGB(140, 160, 195),
+}
+local DEFAULT_ACCENT = RED_BRIGHT
+
+local function LerpColor(a, b, t)
+    return Color3.new(
+        a.R + (b.R - a.R) * t,
+        a.G + (b.G - a.G) * t,
+        a.B + (b.B - a.B) * t
+    )
+end
+
+local function Tint(color, amount)
+    return LerpColor(color, WHITE, amount)
+end
+
+local function Shade(color, amount)
+    return LerpColor(color, BLACK, amount)
+end
+
 --// Wave Config
-local WAVE_COLOR        = RED_BRIGHT
 local WAVE_PEAK_TRANS   = 0.7
 local WAVE_BAND_WIDTH   = 0.25
 local WAVE_DURATION     = 2.7
@@ -92,19 +120,16 @@ local function ApplySelectedGradient(button, enabled)
     end
 end
 
---// NEW: Get toggle state
 function Gui:GetToggleState(tabName, label)
     local toggleKey = tabName .. "_" .. label
     return self.ToggleStates[toggleKey]
 end
 
---// NEW: Set toggle state (for hotkey sync)
 function Gui:SetToggleState(tabName, label, state)
     local toggleKey = tabName .. "_" .. label
     self.ToggleStates[toggleKey] = state
 end
 
---// ScreenGui
 function Gui:Init()
     local old = PlayerGui:FindFirstChild("BlackoutGUI")
     if old then old:Destroy() end
@@ -126,12 +151,8 @@ function Gui:Init()
     Main.ClipsDescendants = true
     Main.Parent = ScreenGui
 
-    local MainCorner = Instance.new("UICorner")
-    MainCorner.CornerRadius = UDim.new(0, 14)
-    MainCorner.Parent = Main
-
     local MainStroke = Instance.new("UIStroke")
-    MainStroke.Color = RED
+    MainStroke.Color = DEFAULT_ACCENT
     MainStroke.Thickness = 2
     MainStroke.Transparency = 0.25
     MainStroke.Parent = Main
@@ -147,14 +168,10 @@ function Gui:Init()
     Background.ZIndex = 1
     Background.Parent = Main
 
-    local BgCorner = Instance.new("UICorner")
-    BgCorner.CornerRadius = UDim.new(0, 14)
-    BgCorner.Parent = Background
-
     local sheen = Instance.new("Frame")
     sheen.Name = "ENI_WaveSheen"
     sheen.Size = UDim2.fromScale(1, 1)
-    sheen.BackgroundColor3 = WAVE_COLOR
+    sheen.BackgroundColor3 = DEFAULT_ACCENT
     sheen.BackgroundTransparency = 0
     sheen.BorderSizePixel = 0
     sheen.ZIndex = 1
@@ -199,10 +216,6 @@ function Gui:Init()
     Top.ZIndex = 2
     Top.Parent = Main
 
-    local TopCorner = Instance.new("UICorner")
-    TopCorner.CornerRadius = UDim.new(0, 14)
-    TopCorner.Parent = Top
-
     local TopBottom = Instance.new("Frame")
     TopBottom.Size = UDim2.new(1, 0, 0, 14)
     TopBottom.Position = UDim2.new(0, 0, 1, -14)
@@ -214,14 +227,10 @@ function Gui:Init()
     local Accent = Instance.new("Frame")
     Accent.Size = UDim2.new(1, -40, 0, 3)
     Accent.Position = UDim2.fromOffset(20, 61)
-    Accent.BackgroundColor3 = RED_BRIGHT
+    Accent.BackgroundColor3 = DEFAULT_ACCENT
     Accent.BorderSizePixel = 0
     Accent.ZIndex = 5
     Accent.Parent = Top
-
-    local AccentCorner = Instance.new("UICorner")
-    AccentCorner.CornerRadius = UDim.new(1, 0)
-    AccentCorner.Parent = Accent
 
     local Title = Instance.new("TextLabel")
     Title.Size = UDim2.new(1, -140, 0, 26)
@@ -261,10 +270,6 @@ function Gui:Init()
     Close.ZIndex = 7
     Close.Parent = Top
 
-    local CloseCorner = Instance.new("UICorner")
-    CloseCorner.CornerRadius = UDim.new(0, 8)
-    CloseCorner.Parent = Close
-
     Close.MouseEnter:Connect(function() Close.BackgroundColor3 = Color3.fromRGB(215, 215, 215) end)
     Close.MouseLeave:Connect(function() Close.BackgroundColor3 = WHITE end)
     Close.MouseButton1Click:Connect(function() self:HideMenu() end)
@@ -277,10 +282,6 @@ function Gui:Init()
     Sidebar.BorderSizePixel = 0
     Sidebar.ZIndex = 2
     Sidebar.Parent = Main
-
-    local SidebarCorner = Instance.new("UICorner")
-    SidebarCorner.CornerRadius = UDim.new(0, 10)
-    SidebarCorner.Parent = Sidebar
 
     local SidebarStroke = Instance.new("UIStroke")
     SidebarStroke.Color = BORDER
@@ -313,7 +314,7 @@ function Gui:Init()
     ContentTitle.Position = UDim2.fromOffset(0, 0)
     ContentTitle.BackgroundTransparency = 1
     ContentTitle.Text = "Combat"
-    ContentTitle.TextColor3 = WHITE
+    ContentTitle.TextColor3 = ACCENTS.Combat
     ContentTitle.TextSize = 20
     ContentTitle.Font = Enum.Font.GothamBold
     ContentTitle.TextXAlignment = Enum.TextXAlignment.Left
@@ -370,6 +371,10 @@ function Gui:Init()
     self.ContentSubtitle = ContentSubtitle
     self.SavedPosition = SavedPosition
     self.OriginalSize = OriginalSize
+    self.MainStroke = MainStroke
+    self.AccentBar = Accent
+    self.Sheen = sheen
+    self.CurrentAccent = DEFAULT_ACCENT
     self.Tabs = {}
     self.CurrentTab = nil
     self.TabButtons = {}
@@ -457,6 +462,7 @@ end
 function Gui:CreateTab(name, description)
     description = description or "Configure your " .. name:lower() .. " settings."
     local index = #self.Tabs + 1
+    local accent = ACCENTS[name] or DEFAULT_ACCENT
 
     local Button = Instance.new("TextButton")
     Button.Name = name:gsub("%s+", "")
@@ -471,10 +477,6 @@ function Gui:CreateTab(name, description)
     Button.Parent = self.Sidebar
 
     ApplySelectedGradient(Button, false)
-
-    local ButtonCorner = Instance.new("UICorner")
-    ButtonCorner.CornerRadius = UDim.new(0, 8)
-    ButtonCorner.Parent = Button
 
     local Text = Instance.new("TextLabel")
     Text.Name = "TabText"
@@ -493,27 +495,23 @@ function Gui:CreateTab(name, description)
     local Indicator = Instance.new("Frame")
     Indicator.Size = UDim2.fromOffset(3, 20)
     Indicator.Position = UDim2.new(0, 5, 0.5, -10)
-    Indicator.BackgroundColor3 = RED_BRIGHT
+    Indicator.BackgroundColor3 = accent
     Indicator.BorderSizePixel = 0
     Indicator.Visible = false
     Indicator.ZIndex = 5
     Indicator.Parent = Button
-
-    local IndicatorCorner = Instance.new("UICorner")
-    IndicatorCorner.CornerRadius = UDim.new(1, 0)
-    IndicatorCorner.Parent = Indicator
 
     local ButtonStroke = Instance.new("UIStroke")
     ButtonStroke.Thickness = 1
     ButtonStroke.Transparency = 1
     ButtonStroke.Parent = Button
 
-    self.TabButtons[name] = { Button = Button, Text = Text, Indicator = Indicator, Stroke = ButtonStroke }
+    self.TabButtons[name] = { Button = Button, Text = Text, Indicator = Indicator, Stroke = ButtonStroke, Accent = accent }
 
     Button.MouseEnter:Connect(function()
         if self.CurrentTab ~= name then
             Button.BackgroundColor3 = HOVER
-            Text.TextColor3 = WHITE
+            Text.TextColor3 = Tint(accent, 0.35)
         end
     end)
     Button.MouseLeave:Connect(function()
@@ -524,7 +522,7 @@ function Gui:CreateTab(name, description)
     end)
     Button.MouseButton1Click:Connect(function() self:SwitchTab(name) end)
 
-    local tabData = { Name = name, Description = description, Elements = {} }
+    local tabData = { Name = name, Description = description, Elements = {}, Accent = accent }
     table.insert(self.Tabs, tabData)
 
     if #self.Tabs == 1 then self:SwitchTab(name) end
@@ -533,13 +531,22 @@ end
 
 function Gui:SwitchTab(name)
     self.CurrentTab = name
+    local tab = self:GetTab(name)
+    local accent = (tab and tab.Accent) or DEFAULT_ACCENT
+    self.CurrentAccent = accent
+
+    if self.MainStroke then self.MainStroke.Color = accent end
+    if self.AccentBar then self.AccentBar.BackgroundColor3 = accent end
+    if self.Sheen then self.Sheen.BackgroundColor3 = accent end
+
     for tabName, data in pairs(self.TabButtons) do
         local isSelected = tabName == name
         if isSelected then
-            data.Button.BackgroundColor3 = SELECTED
-            data.Text.TextColor3 = WHITE
+            data.Button.BackgroundColor3 = Shade(accent, 0.78)
+            data.Text.TextColor3 = Tint(accent, 0.15)
             data.Indicator.Visible = true
-            data.Stroke.Color = RED_BRIGHT
+            data.Indicator.BackgroundColor3 = accent
+            data.Stroke.Color = accent
             data.Stroke.Transparency = 0.45
         else
             data.Button.BackgroundColor3 = BLACK
@@ -552,7 +559,9 @@ function Gui:SwitchTab(name)
     end
 
     self.ContentTitle.Text = name
+    self.ContentTitle.TextColor3 = accent
     self.ContentSubtitle.Text = self:GetTabDescription(name) or ""
+    self.ContentSubtitle.TextColor3 = Tint(accent, 0.55)
 
     for _, child in ipairs(self.Content:GetChildren()) do
         if child ~= self.ContentTitle and child ~= self.ContentSubtitle then
@@ -560,7 +569,6 @@ function Gui:SwitchTab(name)
         end
     end
 
-    local tab = self:GetTab(name)
     if tab and tab.Rebuild then tab.Rebuild(self) end
 end
 
@@ -591,7 +599,7 @@ function Gui:CreateScrollContent()
     ScrollFrame.BackgroundTransparency = 1
     ScrollFrame.BorderSizePixel = 0
     ScrollFrame.ScrollBarThickness = 4
-    ScrollFrame.ScrollBarImageColor3 = RED_BRIGHT
+    ScrollFrame.ScrollBarImageColor3 = self.CurrentAccent or DEFAULT_ACCENT
     ScrollFrame.ScrollBarImageTransparency = 0.5
     ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
     ScrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -609,13 +617,14 @@ function Gui:CreateScrollContent()
 end
 
 function Gui:CreateSection(text, y)
+    local accent = self.CurrentAccent or DEFAULT_ACCENT
     y = y or 0
     local Section = Instance.new("TextLabel")
     Section.Size = UDim2.new(1, 0, 0, 24)
     Section.Position = UDim2.fromOffset(0, y)
     Section.BackgroundTransparency = 1
     Section.Text = text
-    Section.TextColor3 = WHITE
+    Section.TextColor3 = accent
     Section.TextSize = 14
     Section.Font = Enum.Font.GothamBold
     Section.TextXAlignment = Enum.TextXAlignment.Left
@@ -625,7 +634,7 @@ function Gui:CreateSection(text, y)
     local Divider = Instance.new("Frame")
     Divider.Size = UDim2.new(1, 0, 0, 1)
     Divider.Position = UDim2.fromOffset(0, y + 28)
-    Divider.BackgroundColor3 = Color3.fromRGB(65, 25, 27)
+    Divider.BackgroundColor3 = Shade(accent, 0.55)
     Divider.BorderSizePixel = 0
     Divider.ZIndex = 3
     Divider.Parent = self.Content
@@ -634,6 +643,7 @@ function Gui:CreateSection(text, y)
 end
 
 function Gui:CreateToggle(label, default, callback, y)
+    local accent = self.CurrentAccent or DEFAULT_ACCENT
     local toggleKey = self.CurrentTab .. "_" .. label
     local savedState = self.ToggleStates[toggleKey]
     local State = savedState ~= nil and savedState or default
@@ -649,7 +659,7 @@ function Gui:CreateToggle(label, default, callback, y)
     Label.Size = UDim2.new(1, -70, 0, 36)
     Label.BackgroundTransparency = 1
     Label.Text = label
-    Label.TextColor3 = LIGHT
+    Label.TextColor3 = Tint(accent, 0.72)
     Label.TextSize = 13
     Label.Font = Enum.Font.GothamMedium
     Label.TextXAlignment = Enum.TextXAlignment.Left
@@ -659,40 +669,36 @@ function Gui:CreateToggle(label, default, callback, y)
     local ToggleBtn = Instance.new("TextButton")
     ToggleBtn.Size = UDim2.fromOffset(46, 26)
     ToggleBtn.Position = UDim2.new(1, -70, 0, 5)
-    ToggleBtn.BackgroundColor3 = State and RED_BRIGHT or DARK_PANEL
+    ToggleBtn.BackgroundColor3 = State and accent or DARK_PANEL
     ToggleBtn.BorderSizePixel = 0
     ToggleBtn.Text = State and "ON" or "OFF"
-    ToggleBtn.TextColor3 = State and WHITE or GRAY
+    ToggleBtn.TextColor3 = State and BLACK or GRAY
     ToggleBtn.TextSize = 10
     ToggleBtn.Font = Enum.Font.GothamBold
     ToggleBtn.AutoButtonColor = false
     ToggleBtn.ZIndex = 4
     ToggleBtn.Parent = ToggleFrame
 
-    local ToggleCorner = Instance.new("UICorner")
-    ToggleCorner.CornerRadius = UDim.new(0, 6)
-    ToggleCorner.Parent = ToggleBtn
-
     local ToggleStroke = Instance.new("UIStroke")
-    ToggleStroke.Color = State and RED or BORDER
+    ToggleStroke.Color = State and accent or Shade(accent, 0.6)
     ToggleStroke.Thickness = 1
     ToggleStroke.Parent = ToggleBtn
 
     ToggleBtn.MouseEnter:Connect(function()
-        ToggleBtn.BackgroundColor3 = State and Color3.fromRGB(206, 206, 206) or Color3.fromRGB(28, 28, 28)
+        ToggleBtn.BackgroundColor3 = State and Tint(accent, 0.35) or Shade(accent, 0.82)
         ApplySelectedGradient(ToggleBtn, State)
     end)
     ToggleBtn.MouseLeave:Connect(function()
-        ToggleBtn.BackgroundColor3 = State and RED_BRIGHT or DARK_PANEL
+        ToggleBtn.BackgroundColor3 = State and accent or DARK_PANEL
         ApplySelectedGradient(ToggleBtn, State)
     end)
     ToggleBtn.MouseButton1Click:Connect(function()
         State = not State
         self.ToggleStates[toggleKey] = State
-        ToggleBtn.BackgroundColor3 = State and RED_BRIGHT or DARK_PANEL
-        ToggleBtn.TextColor3 = State and WHITE or GRAY
+        ToggleBtn.BackgroundColor3 = State and accent or DARK_PANEL
+        ToggleBtn.TextColor3 = State and BLACK or GRAY
         ToggleBtn.Text = State and "ON" or "OFF"
-        ToggleStroke.Color = State and RED or BORDER
+        ToggleStroke.Color = State and accent or Shade(accent, 0.6)
         ApplySelectedGradient(ToggleBtn, State)
         if callback then callback(State) end
     end)
@@ -701,6 +707,7 @@ function Gui:CreateToggle(label, default, callback, y)
 end
 
 function Gui:CreateSlider(label, min, max, default, callback, y)
+    local accent = self.CurrentAccent or DEFAULT_ACCENT
     local SliderFrame = Instance.new("Frame")
     SliderFrame.Size = UDim2.new(1, 0, 0, 50)
     SliderFrame.Position = UDim2.fromOffset(0, y)
@@ -712,7 +719,7 @@ function Gui:CreateSlider(label, min, max, default, callback, y)
     Label.Size = UDim2.new(1, -70, 0, 20)
     Label.BackgroundTransparency = 1
     Label.Text = label
-    Label.TextColor3 = LIGHT
+    Label.TextColor3 = Tint(accent, 0.72)
     Label.TextSize = 13
     Label.Font = Enum.Font.GothamMedium
     Label.TextXAlignment = Enum.TextXAlignment.Left
@@ -724,7 +731,7 @@ function Gui:CreateSlider(label, min, max, default, callback, y)
     ValueText.Position = UDim2.new(1, -70, 0, 0)
     ValueText.BackgroundTransparency = 1
     ValueText.Text = tostring(default)
-    ValueText.TextColor3 = RED_BRIGHT
+    ValueText.TextColor3 = accent
     ValueText.TextSize = 12
     ValueText.Font = Enum.Font.GothamBold
     ValueText.TextXAlignment = Enum.TextXAlignment.Right
@@ -739,34 +746,22 @@ function Gui:CreateSlider(label, min, max, default, callback, y)
     Track.ZIndex = 4
     Track.Parent = SliderFrame
 
-    local TrackCorner = Instance.new("UICorner")
-    TrackCorner.CornerRadius = UDim.new(0, 2)
-    TrackCorner.Parent = Track
-
     local Fill = Instance.new("Frame")
     local range = max - min
     local startPos = range > 0 and (default - min) / range or 0
     Fill.Size = UDim2.new(startPos, 0, 1, 0)
-    Fill.BackgroundColor3 = RED_BRIGHT
+    Fill.BackgroundColor3 = accent
     Fill.BorderSizePixel = 0
     Fill.ZIndex = 5
     Fill.Parent = Track
 
-    local FillCorner = Instance.new("UICorner")
-    FillCorner.CornerRadius = UDim.new(0, 2)
-    FillCorner.Parent = Fill
-
     local Knob = Instance.new("Frame")
-    Knob.Size = UDim2.fromOffset(14, 14)
-    Knob.Position = UDim2.new(startPos, -7, 0.5, -7)
-    Knob.BackgroundColor3 = WHITE
+    Knob.Size = UDim2.fromOffset(10, 10)
+    Knob.Position = UDim2.new(startPos, -5, 0.5, -5)
+    Knob.BackgroundColor3 = Tint(accent, 0.5)
     Knob.BorderSizePixel = 0
     Knob.ZIndex = 5
     Knob.Parent = Track
-
-    local KnobCorner = Instance.new("UICorner")
-    KnobCorner.CornerRadius = UDim.new(1, 0)
-    KnobCorner.Parent = Knob
 
     local Dragging = false
 
@@ -774,7 +769,7 @@ function Gui:CreateSlider(label, min, max, default, callback, y)
         local pos = math.clamp((input.Position.X - Track.AbsolutePosition.X) / Track.AbsoluteSize.X, 0, 1)
         local value = math.floor(min + (pos * range))
         Fill.Size = UDim2.new(pos, 0, 1, 0)
-        Knob.Position = UDim2.new(pos, -7, 0.5, -7)
+        Knob.Position = UDim2.new(pos, -5, 0.5, -5)
         ValueText.Text = tostring(value)
         if callback then callback(value) end
     end
@@ -796,6 +791,7 @@ function Gui:CreateSlider(label, min, max, default, callback, y)
 end
 
 function Gui:CreateDropdown(label, options, default, callback, y)
+    local accent = self.CurrentAccent or DEFAULT_ACCENT
     local DropFrame = Instance.new("Frame")
     DropFrame.Size = UDim2.new(1, 0, 0, 36)
     DropFrame.Position = UDim2.fromOffset(0, y)
@@ -807,7 +803,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
     Label.Size = UDim2.new(0.4, 0, 1, 0)
     Label.BackgroundTransparency = 1
     Label.Text = label
-    Label.TextColor3 = LIGHT
+    Label.TextColor3 = Tint(accent, 0.72)
     Label.TextSize = 13
     Label.Font = Enum.Font.GothamMedium
     Label.TextXAlignment = Enum.TextXAlignment.Left
@@ -822,26 +818,22 @@ function Gui:CreateDropdown(label, options, default, callback, y)
     DropBtn.BackgroundColor3 = DARK_PANEL
     DropBtn.BorderSizePixel = 0
     DropBtn.Text = selected .. " ▼"
-    DropBtn.TextColor3 = WHITE
+    DropBtn.TextColor3 = Tint(accent, 0.4)
     DropBtn.TextSize = 11
     DropBtn.Font = Enum.Font.GothamMedium
     DropBtn.AutoButtonColor = false
     DropBtn.ZIndex = 4
     DropBtn.Parent = DropFrame
 
-    local DropCorner = Instance.new("UICorner")
-    DropCorner.CornerRadius = UDim.new(0, 6)
-    DropCorner.Parent = DropBtn
-
     local DropStroke = Instance.new("UIStroke")
-    DropStroke.Color = BORDER
+    DropStroke.Color = Shade(accent, 0.6)
     DropStroke.Thickness = 1
     DropStroke.Parent = DropBtn
 
     local Popup = Instance.new("Frame")
     Popup.Name = "DropdownPopup"
     Popup.Size = UDim2.fromOffset(150, math.min(#options * 26, 260))
-    Popup.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+    Popup.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
     Popup.BorderSizePixel = 0
     Popup.Visible = false
     Popup.ZIndex = 100
@@ -854,12 +846,8 @@ function Gui:CreateDropdown(label, options, default, callback, y)
         if callback then callback(newValue) end
     end
 
-    local PopupCorner = Instance.new("UICorner")
-    PopupCorner.CornerRadius = UDim.new(0, 8)
-    PopupCorner.Parent = Popup
-
     local PopupStroke = Instance.new("UIStroke")
-    PopupStroke.Color = RED
+    PopupStroke.Color = accent
     PopupStroke.Thickness = 1.5
     PopupStroke.Parent = Popup
 
@@ -869,7 +857,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
     PopupScroll.BackgroundTransparency = 1
     PopupScroll.BorderSizePixel = 0
     PopupScroll.ScrollBarThickness = 3
-    PopupScroll.ScrollBarImageColor3 = RED_BRIGHT
+    PopupScroll.ScrollBarImageColor3 = accent
     PopupScroll.CanvasSize = UDim2.new(0, 0, 0, #options * 26)
     PopupScroll.ZIndex = 101
     PopupScroll.Parent = Popup
@@ -883,10 +871,10 @@ function Gui:CreateDropdown(label, options, default, callback, y)
         local OptBtn = Instance.new("TextButton")
         OptBtn.Size = UDim2.new(1, 0, 0, 25)
         OptBtn.LayoutOrder = i
-        OptBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+        OptBtn.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
         OptBtn.BorderSizePixel = 0
         OptBtn.Text = "  " .. opt
-        OptBtn.TextColor3 = opt == selected and RED_BRIGHT or LIGHT
+        OptBtn.TextColor3 = opt == selected and accent or LIGHT
         OptBtn.TextSize = 11
         OptBtn.Font = Enum.Font.GothamMedium
         OptBtn.TextXAlignment = Enum.TextXAlignment.Left
@@ -895,10 +883,10 @@ function Gui:CreateDropdown(label, options, default, callback, y)
         OptBtn.Parent = PopupScroll
 
         OptBtn.MouseEnter:Connect(function()
-            OptBtn.BackgroundColor3 = Color3.fromRGB(40, 22, 24)
+            OptBtn.BackgroundColor3 = Shade(accent, 0.8)
         end)
         OptBtn.MouseLeave:Connect(function()
-            OptBtn.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+            OptBtn.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
         end)
         OptBtn.MouseButton1Click:Connect(function()
             local newValue = tostring(opt)
@@ -907,7 +895,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
             for _, child in ipairs(PopupScroll:GetChildren()) do
                 if child:IsA("TextButton") then
                     local txt = child.Text:gsub("^%s+", "")
-                    child.TextColor3 = txt == newValue and RED_BRIGHT or LIGHT
+                    child.TextColor3 = txt == newValue and accent or LIGHT
                 end
             end
             Popup.Visible = false
@@ -950,36 +938,306 @@ function Gui:CreateDropdown(label, options, default, callback, y)
     return y + 42
 end
 
+--// ═══════════════════════════════════════════════════════════════
+--//  COLOR WHEEL (HSV)
+--// ═══════════════════════════════════════════════════════════════
+function Gui:CreateColorPicker(label, defaultColor, callback, y)
+    local accent = self.CurrentAccent or DEFAULT_ACCENT
+    local color = defaultColor or Color3.fromRGB(255, 0, 0)
+
+    local PickerFrame = Instance.new("Frame")
+    PickerFrame.Size = UDim2.new(1, 0, 0, 36)
+    PickerFrame.Position = UDim2.fromOffset(0, y)
+    PickerFrame.BackgroundTransparency = 1
+    PickerFrame.ZIndex = 3
+    PickerFrame.Parent = self.Content
+
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, -100, 0, 36)
+    Label.BackgroundTransparency = 1
+    Label.Text = label
+    Label.TextColor3 = Tint(accent, 0.72)
+    Label.TextSize = 13
+    Label.Font = Enum.Font.GothamMedium
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.ZIndex = 4
+    Label.Parent = PickerFrame
+
+    local Swatch = Instance.new("TextButton")
+    Swatch.Size = UDim2.fromOffset(80, 26)
+    Swatch.Position = UDim2.new(1, -100, 0, 5)
+    Swatch.BackgroundColor3 = color
+    Swatch.BorderSizePixel = 0
+    Swatch.Text = ""
+    Swatch.AutoButtonColor = false
+    Swatch.ZIndex = 4
+    Swatch.Parent = PickerFrame
+
+    local SwatchStroke = Instance.new("UIStroke")
+    SwatchStroke.Color = Shade(accent, 0.5)
+    SwatchStroke.Thickness = 1
+    SwatchStroke.Parent = Swatch
+
+    --// Popup
+    local Popup = Instance.new("Frame")
+    Popup.Name = "ColorPickerPopup"
+    Popup.Size = UDim2.fromOffset(212, 214)
+    Popup.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+    Popup.BorderSizePixel = 0
+    Popup.Visible = false
+    Popup.ZIndex = 100
+    Popup.Parent = self.ScreenGui
+
+    local PopupStroke = Instance.new("UIStroke")
+    PopupStroke.Color = accent
+    PopupStroke.Thickness = 1.5
+    PopupStroke.Parent = Popup
+
+    local h, s, v = Color3.toHSV(color)
+
+    local SV = Instance.new("Frame")
+    SV.Size = UDim2.fromOffset(196, 122)
+    SV.Position = UDim2.fromOffset(8, 8)
+    SV.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+    SV.BorderSizePixel = 0
+    SV.ZIndex = 101
+    SV.Parent = Popup
+
+    local SatGrad = Instance.new("Frame")
+    SatGrad.Size = UDim2.fromScale(1, 1)
+    SatGrad.BackgroundColor3 = WHITE
+    SatGrad.BorderSizePixel = 0
+    SatGrad.ZIndex = 102
+    SatGrad.Parent = SV
+
+    local SatGradient = Instance.new("UIGradient")
+    SatGradient.Rotation = 0
+    SatGradient.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(1, 1),
+    })
+    SatGradient.Parent = SatGrad
+
+    local ValGrad = Instance.new("Frame")
+    ValGrad.Size = UDim2.fromScale(1, 1)
+    ValGrad.BackgroundColor3 = BLACK
+    ValGrad.BorderSizePixel = 0
+    ValGrad.ZIndex = 103
+    ValGrad.Parent = SV
+
+    local ValGradient = Instance.new("UIGradient")
+    ValGradient.Rotation = 90
+    ValGradient.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1),
+        NumberSequenceKeypoint.new(1, 0),
+    })
+    ValGradient.Parent = ValGrad
+
+    local Cursor = Instance.new("Frame")
+    Cursor.Size = UDim2.fromOffset(8, 8)
+    Cursor.BackgroundTransparency = 1
+    Cursor.BorderSizePixel = 0
+    Cursor.ZIndex = 104
+    Cursor.Parent = SV
+
+    local CursorStroke = Instance.new("UIStroke")
+    CursorStroke.Color = WHITE
+    CursorStroke.Thickness = 1.5
+    CursorStroke.Parent = Cursor
+
+    local HueBar = Instance.new("Frame")
+    HueBar.Size = UDim2.fromOffset(196, 14)
+    HueBar.Position = UDim2.fromOffset(8, 138)
+    HueBar.BackgroundColor3 = WHITE
+    HueBar.BorderSizePixel = 0
+    HueBar.ZIndex = 101
+    HueBar.Parent = Popup
+
+    local HueGradient = Instance.new("UIGradient")
+    HueGradient.Rotation = 0
+    HueGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0.000, Color3.fromRGB(255, 0, 0)),
+        ColorSequenceKeypoint.new(0.167, Color3.fromRGB(255, 255, 0)),
+        ColorSequenceKeypoint.new(0.333, Color3.fromRGB(0, 255, 0)),
+        ColorSequenceKeypoint.new(0.500, Color3.fromRGB(0, 255, 255)),
+        ColorSequenceKeypoint.new(0.667, Color3.fromRGB(0, 0, 255)),
+        ColorSequenceKeypoint.new(0.833, Color3.fromRGB(255, 0, 255)),
+        ColorSequenceKeypoint.new(1.000, Color3.fromRGB(255, 0, 0)),
+    })
+    HueGradient.Parent = HueBar
+
+    local HueCursor = Instance.new("Frame")
+    HueCursor.Size = UDim2.fromOffset(4, 20)
+    HueCursor.Position = UDim2.new(h, -2, 0.5, -10)
+    HueCursor.BackgroundColor3 = WHITE
+    HueCursor.BorderSizePixel = 0
+    HueCursor.ZIndex = 102
+    HueCursor.Parent = HueBar
+
+    local Preview = Instance.new("Frame")
+    Preview.Size = UDim2.fromOffset(56, 24)
+    Preview.Position = UDim2.fromOffset(8, 162)
+    Preview.BackgroundColor3 = color
+    Preview.BorderSizePixel = 0
+    Preview.ZIndex = 101
+    Preview.Parent = Popup
+
+    local PreviewStroke = Instance.new("UIStroke")
+    PreviewStroke.Color = Color3.fromRGB(60, 60, 60)
+    PreviewStroke.Thickness = 1
+    PreviewStroke.Parent = Preview
+
+    local HexLabel = Instance.new("TextLabel")
+    HexLabel.Size = UDim2.fromOffset(132, 24)
+    HexLabel.Position = UDim2.fromOffset(72, 162)
+    HexLabel.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+    HexLabel.BorderSizePixel = 0
+    HexLabel.Text = ""
+    HexLabel.TextColor3 = WHITE
+    HexLabel.TextSize = 12
+    HexLabel.Font = Enum.Font.Code
+    HexLabel.ZIndex = 101
+    HexLabel.Parent = Popup
+
+    local RGBLabel = Instance.new("TextLabel")
+    RGBLabel.Size = UDim2.fromOffset(196, 16)
+    RGBLabel.Position = UDim2.fromOffset(8, 190)
+    RGBLabel.BackgroundTransparency = 1
+    RGBLabel.Text = ""
+    RGBLabel.TextColor3 = GRAY
+    RGBLabel.TextSize = 11
+    RGBLabel.Font = Enum.Font.Code
+    RGBLabel.TextXAlignment = Enum.TextXAlignment.Left
+    RGBLabel.ZIndex = 101
+    RGBLabel.Parent = Popup
+
+    local function PushColor(fireCallback)
+        local c = Color3.fromHSV(h, s, v)
+        color = c
+        Swatch.BackgroundColor3 = c
+        Preview.BackgroundColor3 = c
+        SV.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+        HueCursor.Position = UDim2.new(h, -2, 0.5, -10)
+        Cursor.Position = UDim2.new(s, -4, 1 - v, -4)
+        HexLabel.Text = string.format("#%02X%02X%02X",
+            math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+        RGBLabel.Text = string.format("R %d   G %d   B %d",
+            math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
+        if fireCallback and callback then callback(c) end
+    end
+
+    local draggingSV = false
+    local draggingHue = false
+
+    local function UpdateSV(input)
+        local pos = SV.AbsolutePosition
+        local size = SV.AbsoluteSize
+        s = math.clamp((input.Position.X - pos.X) / size.X, 0, 1)
+        v = 1 - math.clamp((input.Position.Y - pos.Y) / size.Y, 0, 1)
+        PushColor(true)
+    end
+
+    local function UpdateHue(input)
+        local pos = HueBar.AbsolutePosition
+        local size = HueBar.AbsoluteSize
+        h = math.clamp((input.Position.X - pos.X) / size.X, 0, 1)
+        PushColor(true)
+    end
+
+    SV.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            draggingSV = true
+            UpdateSV(input)
+        end
+    end)
+    HueBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            draggingHue = true
+            UpdateHue(input)
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+        if draggingSV then UpdateSV(input) end
+        if draggingHue then UpdateHue(input) end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            draggingSV = false
+            draggingHue = false
+        end
+    end)
+
+    Swatch.MouseEnter:Connect(function() SwatchStroke.Color = accent end)
+    Swatch.MouseLeave:Connect(function() SwatchStroke.Color = Shade(accent, 0.5) end)
+    Swatch.MouseButton1Click:Connect(function()
+        if Popup.Visible then
+            Popup.Visible = false
+        else
+            local absPos = Swatch.AbsolutePosition
+            local absSize = Swatch.AbsoluteSize
+            local px = math.clamp(absPos.X + absSize.X - 212, 4, 10000)
+            local py = math.clamp(absPos.Y + absSize.Y + 4, 4, 10000)
+            Popup.Position = UDim2.fromOffset(px, py)
+            Popup.Visible = true
+            PushColor(false)
+        end
+    end)
+
+    UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 and Popup.Visible then
+            if draggingSV or draggingHue then return end
+            local mousePos = Vector2.new(input.Position.X, input.Position.Y)
+            local absPos = Popup.AbsolutePosition
+            local absSize = Popup.AbsoluteSize
+            local btnPos = Swatch.AbsolutePosition
+            local btnSize = Swatch.AbsoluteSize
+
+            local inPopup = mousePos.X >= absPos.X and mousePos.X <= absPos.X + absSize.X and
+                            mousePos.Y >= absPos.Y and mousePos.Y <= absPos.Y + absSize.Y
+            local inBtn = mousePos.X >= btnPos.X and mousePos.X <= btnPos.X + btnSize.X and
+                          mousePos.Y >= btnPos.Y and mousePos.Y <= btnPos.Y + btnSize.Y
+
+            if not inPopup and not inBtn then
+                Popup.Visible = false
+            end
+        end
+    end)
+
+    PushColor(false)
+
+    return y + 42
+end
+
 function Gui:CreateButton(label, callback, y)
+    local accent = self.CurrentAccent or DEFAULT_ACCENT
     local Btn = Instance.new("TextButton")
     Btn.Size = UDim2.new(1, 0, 0, 34)
     Btn.Position = UDim2.fromOffset(0, y)
     Btn.BackgroundColor3 = DARK_PANEL
     Btn.BorderSizePixel = 0
     Btn.Text = label
-    Btn.TextColor3 = WHITE
+    Btn.TextColor3 = Tint(accent, 0.5)
     Btn.TextSize = 12
     Btn.Font = Enum.Font.GothamBold
     Btn.AutoButtonColor = false
     Btn.ZIndex = 3
     Btn.Parent = self.Content
 
-    local BtnCorner = Instance.new("UICorner")
-    BtnCorner.CornerRadius = UDim.new(0, 6)
-    BtnCorner.Parent = Btn
-
     local BtnStroke = Instance.new("UIStroke")
-    BtnStroke.Color = BORDER
+    BtnStroke.Color = Shade(accent, 0.6)
     BtnStroke.Thickness = 1
     BtnStroke.Parent = Btn
 
     Btn.MouseEnter:Connect(function()
-        Btn.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-        BtnStroke.Color = RED
+        Btn.BackgroundColor3 = Shade(accent, 0.86)
+        BtnStroke.Color = accent
     end)
     Btn.MouseLeave:Connect(function()
         Btn.BackgroundColor3 = DARK_PANEL
-        BtnStroke.Color = BORDER
+        BtnStroke.Color = Shade(accent, 0.6)
     end)
     Btn.MouseButton1Click:Connect(function() if callback then callback() end end)
 
@@ -987,12 +1245,13 @@ function Gui:CreateButton(label, callback, y)
 end
 
 function Gui:CreateKeybindSetting(y)
+    local accent = self.CurrentAccent or DEFAULT_ACCENT
     local KeyLabel = Instance.new("TextLabel")
     KeyLabel.Size = UDim2.new(1, -140, 0, 28)
     KeyLabel.Position = UDim2.fromOffset(0, y)
     KeyLabel.BackgroundTransparency = 1
     KeyLabel.Text = "GUI Toggle Keybind"
-    KeyLabel.TextColor3 = LIGHT
+    KeyLabel.TextColor3 = Tint(accent, 0.72)
     KeyLabel.TextSize = 13
     KeyLabel.Font = Enum.Font.GothamMedium
     KeyLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -1025,34 +1284,31 @@ function Gui:CreateKeybindSetting(y)
     Keybind.ZIndex = 3
     Keybind.Parent = self.Content
 
-    local KeyCorner = Instance.new("UICorner")
-    KeyCorner.CornerRadius = UDim.new(0, 7)
-    KeyCorner.Parent = Keybind
-
     local KeyStroke = Instance.new("UIStroke")
-    KeyStroke.Color = BORDER
+    KeyStroke.Color = Shade(accent, 0.6)
     KeyStroke.Thickness = 1
     KeyStroke.Parent = Keybind
 
     Keybind.MouseEnter:Connect(function()
-        if not WaitingForKey then Keybind.BackgroundColor3 = SELECTED KeyStroke.Color = RED end
+        if not WaitingForKey then Keybind.BackgroundColor3 = Shade(accent, 0.78) KeyStroke.Color = accent end
     end)
     Keybind.MouseLeave:Connect(function()
-        if not WaitingForKey then Keybind.BackgroundColor3 = DARK_PANEL KeyStroke.Color = BORDER end
+        if not WaitingForKey then Keybind.BackgroundColor3 = DARK_PANEL KeyStroke.Color = Shade(accent, 0.6) end
     end)
     Keybind.MouseButton1Click:Connect(function()
         if WaitingForKey then return end
         WaitingForKey = true
         Keybind.Text = "Press a key..."
-        Keybind.TextColor3 = RED_BRIGHT
-        Keybind.BackgroundColor3 = RED_DARK
-        KeyStroke.Color = RED_BRIGHT
+        Keybind.TextColor3 = accent
+        Keybind.BackgroundColor3 = Shade(accent, 0.7)
+        KeyStroke.Color = accent
     end)
 
     return y + 58
 end
 
 function Gui:CreateMouseUnlockToggle(y)
+    local accent = self.CurrentAccent or DEFAULT_ACCENT
     local toggleKey = self.CurrentTab .. "_UnlockMouseOnGUI"
     local savedState = self.ToggleStates[toggleKey]
     local State = savedState ~= nil and savedState or true
@@ -1069,7 +1325,7 @@ function Gui:CreateMouseUnlockToggle(y)
     Label.Size = UDim2.new(1, -70, 0, 36)
     Label.BackgroundTransparency = 1
     Label.Text = "Unlock Mouse on GUI Toggle"
-    Label.TextColor3 = LIGHT
+    Label.TextColor3 = Tint(accent, 0.72)
     Label.TextSize = 13
     Label.Font = Enum.Font.GothamMedium
     Label.TextXAlignment = Enum.TextXAlignment.Left
@@ -1079,10 +1335,10 @@ function Gui:CreateMouseUnlockToggle(y)
     local ToggleBtn = Instance.new("TextButton")
     ToggleBtn.Size = UDim2.fromOffset(46, 26)
     ToggleBtn.Position = UDim2.new(1, -70, 0, 5)
-    ToggleBtn.BackgroundColor3 = State and RED_BRIGHT or DARK_PANEL
+    ToggleBtn.BackgroundColor3 = State and accent or DARK_PANEL
     ToggleBtn.BorderSizePixel = 0
     ToggleBtn.Text = State and "ON" or "OFF"
-    ToggleBtn.TextColor3 = State and WHITE or GRAY
+    ToggleBtn.TextColor3 = State and BLACK or GRAY
     ToggleBtn.TextSize = 10
     ToggleBtn.Font = Enum.Font.GothamBold
     ToggleBtn.AutoButtonColor = false
@@ -1090,31 +1346,27 @@ function Gui:CreateMouseUnlockToggle(y)
     ToggleBtn.Parent = ToggleFrame
     ApplySelectedGradient(ToggleBtn, State)
 
-    local ToggleCorner = Instance.new("UICorner")
-    ToggleCorner.CornerRadius = UDim.new(0, 6)
-    ToggleCorner.Parent = ToggleBtn
-
     local ToggleStroke = Instance.new("UIStroke")
-    ToggleStroke.Color = State and RED or BORDER
+    ToggleStroke.Color = State and accent or Shade(accent, 0.6)
     ToggleStroke.Thickness = 1
     ToggleStroke.Parent = ToggleBtn
 
     ToggleBtn.MouseEnter:Connect(function()
-        ToggleBtn.BackgroundColor3 = State and Color3.fromRGB(206, 206, 206) or Color3.fromRGB(28, 28, 28)
+        ToggleBtn.BackgroundColor3 = State and Tint(accent, 0.35) or Shade(accent, 0.82)
         ApplySelectedGradient(ToggleBtn, State)
     end)
     ToggleBtn.MouseLeave:Connect(function()
-        ToggleBtn.BackgroundColor3 = State and RED_BRIGHT or DARK_PANEL
+        ToggleBtn.BackgroundColor3 = State and accent or DARK_PANEL
         ApplySelectedGradient(ToggleBtn, State)
     end)
     ToggleBtn.MouseButton1Click:Connect(function()
         State = not State
         self.ToggleStates[toggleKey] = State
         UnlockMouseOnGUI = State
-        ToggleBtn.BackgroundColor3 = State and RED_BRIGHT or DARK_PANEL
-        ToggleBtn.TextColor3 = State and WHITE or GRAY
+        ToggleBtn.BackgroundColor3 = State and accent or DARK_PANEL
+        ToggleBtn.TextColor3 = State and BLACK or GRAY
         ToggleBtn.Text = State and "ON" or "OFF"
-        ToggleStroke.Color = State and RED or BORDER
+        ToggleStroke.Color = State and accent or Shade(accent, 0.6)
         ApplySelectedGradient(ToggleBtn, State)
     end)
 
