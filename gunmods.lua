@@ -42,7 +42,7 @@ local ModsLoopRunning = false
 local ModsLoopConnection = nil
 
 local function AnyModActive()
-    return GunMods.Config.NoRecoil or GunMods.Config.NoSpread 
+    return GunMods.Config.NoRecoil or GunMods.Config.NoSpread
         or GunMods.Config.RapidFire or GunMods.Config.FastReload
 end
 
@@ -207,7 +207,9 @@ end
 
 --// ═══════════════════════════════════════════════════════════════
 --//  VIEWMODEL CHAMS — Arsenal Specific
---//  Stores originals so both guns AND arms restore on toggle-off.
+--//  Applies to the real viewmodel AND any clone, so the two systems
+--//  don't mask each other. Generation counter replaces the marker gate
+--//  because a clone inherits the marker and would skip itself forever.
 --// ═══════════════════════════════════════════════════════════════
 
 local Viewmodel = {
@@ -219,6 +221,9 @@ local Viewmodel = {
     OriginalArmData = {},
 }
 
+local ChamsGen = 0
+local AppliedGen = setmetatable({}, { __mode = "k" })
+
 local MaterialsList = {
     "ForceField", "Neon", "Glass", "Ice", "Metal",
     "Plastic", "SmoothPlastic"
@@ -226,6 +231,15 @@ local MaterialsList = {
 
 local function GetMaterial()
     return Enum.Material[GunMods.Config.ChamsMaterial] or Enum.Material.ForceField
+end
+
+local function GetContainers()
+    local list = {}
+    local arms = Camera:FindFirstChild("Arms")
+    if arms then table.insert(list, arms) end
+    local clone = Camera:FindFirstChild("ENI_CustomVM")
+    if clone then table.insert(list, clone) end
+    return list
 end
 
 local function CleanupOriginalData()
@@ -237,23 +251,25 @@ local function CleanupOriginalData()
     end
 end
 
---// Snapshot gun parts before modifying
+--// Snapshot gun parts before modifying.
+--// MeshPart is tested FIRST — it inherits BasePart, so a BasePart-first
+--// check would lose TextureID and the gun would stay untextured forever.
 local function SnapshotGunPart(part)
     if not part or Viewmodel.OriginalGunData[part] then return end
-    if part:IsA("BasePart") then
+    if part:IsA("MeshPart") then
         Viewmodel.OriginalGunData[part] = {
-            Color = part.Color,
             Transparency = part.Transparency,
-            Material = part.Material,
-            Reflectance = part.Reflectance,
-        }
-    elseif part:IsA("MeshPart") then
-        Viewmodel.OriginalGunData[part] = {
             Color = part.Color,
-            Transparency = part.Transparency,
             Material = part.Material,
             Reflectance = part.Reflectance,
             TextureID = part.TextureID,
+        }
+    elseif part:IsA("BasePart") then
+        Viewmodel.OriginalGunData[part] = {
+            Transparency = part.Transparency,
+            Color = part.Color,
+            Material = part.Material,
+            Reflectance = part.Reflectance,
         }
     elseif part:IsA("SpecialMesh") then
         Viewmodel.OriginalGunData[part] = {
@@ -267,8 +283,8 @@ local function SnapshotArmPart(part)
     if not part or Viewmodel.OriginalArmData[part] then return end
     if part:IsA("BasePart") then
         Viewmodel.OriginalArmData[part] = {
-            Color = part.Color,
             Transparency = part.Transparency,
+            Color = part.Color,
             Material = part.Material,
         }
     elseif part:IsA("SpecialMesh") then
@@ -282,96 +298,92 @@ local function SnapshotArmPart(part)
     end
 end
 
---// Apply gun chams
-local function ApplyGunChams()
-    local arms = Camera:FindFirstChild("Arms")
-    if not arms then return end
-    if arms:FindFirstChild(Viewmodel.GunMarkerName) then return end
-
-    local marker = Instance.new("Folder")
-    marker.Name = Viewmodel.GunMarkerName
-    marker.Parent = arms
+local function ApplyGunChamsTo(container)
+    if not container then return end
+    if AppliedGen[container] == ChamsGen then return end
+    AppliedGen[container] = ChamsGen
 
     local mat = GetMaterial()
     local col = GunMods.Config.ChamsColor
     local refl = GunMods.Config.ChamsReflectance
     local trans = GunMods.Config.ChamsTransparency
 
-    for _, child in ipairs(arms:GetChildren()) do
-        if child.Name == "CSSArms" then continue end
+    local function handle(part)
+        if not part then return end
+        SnapshotGunPart(part)
+        local data = Viewmodel.OriginalGunData[part]
+        if not data then return end
 
-        if child:IsA("BasePart") and child.Transparency ~= 1 then
-            SnapshotGunPart(child)
-            child.Color = col
-            child.Reflectance = refl
-            child.Transparency = trans
-            child.Material = mat
-        end
-        if child:IsA("MeshPart") then
-            SnapshotGunPart(child)
-            child.TextureID = ""
-        end
+        --// parts that were already invisible stay invisible
+        if data.Transparency and data.Transparency >= 1 then return end
 
-        for _, desc in ipairs(child:GetDescendants()) do
-            if desc:IsA("BasePart") then
-                SnapshotGunPart(desc)
-                desc.Color = col
-                desc.Reflectance = refl
-                desc.Transparency = trans
-                desc.Material = mat
-            end
-            if desc:IsA("MeshPart") then
-                SnapshotGunPart(desc)
-                desc.TextureID = ""
-            end
-            if desc:IsA("SpecialMesh") then
-                SnapshotGunPart(desc)
-                desc.TextureId = ""
+        if part:IsA("BasePart") then
+            part.Color = col
+            part.Reflectance = refl
+            part.Transparency = trans
+            part.Material = mat
+        end
+        if part:IsA("MeshPart") then
+            part.TextureID = ""
+        end
+        if part:IsA("SpecialMesh") then
+            part.TextureId = ""
+        end
+    end
+
+    for _, child in ipairs(container:GetChildren()) do
+        if child.Name ~= "CSSArms" and child.Name ~= Viewmodel.GunMarkerName then
+            handle(child)
+            for _, desc in ipairs(child:GetDescendants()) do
+                handle(desc)
             end
         end
     end
 end
 
---// Apply arm chams
-local function ApplyArmChams()
-    local arms = Camera:FindFirstChild("Arms")
-    if not arms then return end
-    local cssArms = arms:FindFirstChild("CSSArms")
+local function ApplyArmChamsTo(container)
+    if not container then return end
+    local cssArms = container:FindFirstChild("CSSArms")
     if not cssArms then return end
-    if cssArms:FindFirstChild(Viewmodel.ArmMarkerName) then return end
-
-    CleanupOriginalData()
-
-    local marker = Instance.new("Folder")
-    marker.Name = Viewmodel.ArmMarkerName
-    marker.Parent = cssArms
+    if AppliedGen[cssArms] == ChamsGen then return end
+    AppliedGen[cssArms] = ChamsGen
 
     local col = GunMods.Config.ArmsColor
     local trans = GunMods.Config.ArmsTransparency
 
     for _, desc in ipairs(cssArms:GetDescendants()) do
-        if desc:IsA("BasePart") and desc.Transparency ~= 1 then
-            SnapshotArmPart(desc)
-            desc.Color = col
-            desc.Transparency = trans
-        elseif desc:IsA("SpecialMesh") then
-            SnapshotArmPart(desc)
-            desc.TextureId = ""
-        elseif desc:IsA("Decal") or desc:IsA("Texture") then
-            SnapshotArmPart(desc)
-            desc.Transparency = 1
+        SnapshotArmPart(desc)
+        local data = Viewmodel.OriginalArmData[desc]
+        if data and not (data.Transparency and data.Transparency >= 1) then
+            if desc:IsA("BasePart") then
+                desc.Color = col
+                desc.Transparency = trans
+            elseif desc:IsA("SpecialMesh") then
+                desc.TextureId = ""
+            elseif desc:IsA("Decal") or desc:IsA("Texture") then
+                desc.Transparency = 1
+            end
         end
     end
 end
 
---// Restore gun parts
-local function RestoreGunChams()
-    local arms = Camera:FindFirstChild("Arms")
-    if not arms then return end
+local function ApplyGunChams()
+    for _, container in ipairs(GetContainers()) do
+        ApplyGunChamsTo(container)
+    end
+end
 
+local function ApplyArmChams()
+    for _, container in ipairs(GetContainers()) do
+        ApplyArmChamsTo(container)
+    end
+end
+
+--// Restore gun parts (no dependency on Arms existing)
+local function RestoreGunChams()
     for part, data in pairs(Viewmodel.OriginalGunData) do
         if part and part.Parent then
-            if part:IsA("BasePart") or part:IsA("MeshPart") then
+            if part:IsA("BasePart") then
                 if data.Color then part.Color = data.Color end
                 if data.Transparency ~= nil then part.Transparency = data.Transparency end
                 if data.Material then part.Material = data.Material end
@@ -390,11 +402,6 @@ end
 
 --// Restore arm parts
 local function RestoreArmChams()
-    local arms = Camera:FindFirstChild("Arms")
-    if not arms then return end
-    local cssArms = arms:FindFirstChild("CSSArms")
-    if not cssArms then return end
-
     for part, data in pairs(Viewmodel.OriginalArmData) do
         if part and part.Parent then
             if part:IsA("BasePart") then
@@ -411,22 +418,24 @@ local function RestoreArmChams()
     Viewmodel.OriginalArmData = {}
 end
 
---// Marker management
+--// Marker management — bump the generation so everything re-applies
 local function ClearGunMarker()
-    local arms = Camera:FindFirstChild("Arms")
-    if arms then
-        local gunMarker = arms:FindFirstChild(Viewmodel.GunMarkerName)
-        if gunMarker then gunMarker:Destroy() end
+    ChamsGen = ChamsGen + 1
+    for _, container in ipairs(GetContainers()) do
+        local marker = container:FindFirstChild(Viewmodel.GunMarkerName)
+        if marker then marker:Destroy() end
     end
 end
 
 local function ClearArmMarker()
-    local arms = Camera:FindFirstChild("Arms")
-    if not arms then return end
-    local cssArms = arms:FindFirstChild("CSSArms")
-    if not cssArms then return end
-    local armMarker = cssArms:FindFirstChild(Viewmodel.ArmMarkerName)
-    if armMarker then armMarker:Destroy() end
+    ChamsGen = ChamsGen + 1
+    for _, container in ipairs(GetContainers()) do
+        local cssArms = container:FindFirstChild("CSSArms")
+        if cssArms then
+            local marker = cssArms:FindFirstChild(Viewmodel.ArmMarkerName)
+            if marker then marker:Destroy() end
+        end
+    end
 end
 
 local function ClearAllMarkers()
@@ -443,6 +452,8 @@ local function StartChamsLoop()
             return
         end
 
+        CleanupOriginalData()
+
         if GunMods.Config.ChamsEnabled then
             ApplyGunChams()
         end
@@ -453,9 +464,9 @@ local function StartChamsLoop()
 
         if GunMods.Config.ChamsRainbow and GunMods.Config.ChamsEnabled then
             Viewmodel.RainbowHue = (Viewmodel.RainbowHue + dt * GunMods.Config.ChamsRainbowSpeed) % 1
-            GunMods.Config.ChamsColor = Color3.fromHSV(Viewmodel.RainbowHue, 1, 1)
-            GunMods.Config.ArmsColor = GunMods.Config.ChamsColor
-            ClearAllMarkers()
+            local hueColor = Color3.fromHSV(Viewmodel.RainbowHue, 1, 1)
+            GunMods.Config.ChamsColor = hueColor
+            GunMods.Config.ArmsColor = hueColor
         end
     end)
 end
@@ -605,29 +616,15 @@ function GunMods:Init(Gui)
             ClearAllMarkers()
         end, y)
 
-        y = g:CreateSection("Cham Colors", y + 10)
+        -- Color wheel instead of preset buttons
+        y = g:CreateSection("Cham Color", y + 10)
 
-        local ColorPresets = {
-            {Name = "Red", Color = Color3.fromRGB(255, 0, 0)},
-            {Name = "Blue", Color = Color3.fromRGB(0, 100, 255)},
-            {Name = "Green", Color = Color3.fromRGB(0, 255, 0)},
-            {Name = "Purple", Color = Color3.fromRGB(150, 0, 255)},
-            {Name = "Pink", Color = Color3.fromRGB(255, 100, 200)},
-            {Name = "Orange", Color = Color3.fromRGB(255, 150, 0)},
-            {Name = "Yellow", Color = Color3.fromRGB(255, 255, 0)},
-            {Name = "Cyan", Color = Color3.fromRGB(0, 255, 255)},
-            {Name = "White", Color = Color3.fromRGB(255, 255, 255)},
-            {Name = "Black", Color = Color3.fromRGB(20, 20, 20)},
-        }
-
-        for _, preset in ipairs(ColorPresets) do
-            y = g:CreateButton(preset.Name, function()
-                GunMods.Config.ChamsColor = preset.Color
-                GunMods.Config.ArmsColor = preset.Color
-                GunMods.Config.ChamsRainbow = false
-                ClearAllMarkers()
-            end, y)
-        end
+        y = g:CreateColorPicker("Color", GunMods.Config.ChamsColor, function(c)
+            GunMods.Config.ChamsColor = c
+            GunMods.Config.ArmsColor = c
+            GunMods.Config.ChamsRainbow = false
+            ClearAllMarkers()
+        end, y)
 
         g.Content = originalContent
     end)
@@ -649,7 +646,6 @@ function GunMods:Init(Gui)
         end
     end)
 
-    
     return self
 end
 
