@@ -43,6 +43,7 @@ Combat.Config = {
     HeadHBSize = 20,
     AimKey = Enum.UserInputType.MouseButton2,
     KillAll = false,
+    KillAllFloorMargin = 120,
     HitsoundsEnabled = false,
     Hitsound = "Skeet.cc",
     HitsoundVolume = 1,
@@ -691,19 +692,25 @@ end)
 --// KILL ALL
 local killAllConnection = nil
 local killAllActive = false
+local killAllSavedPos = nil
+local killAllRestored = false
 
-local function GetClosestEnemyForKillAll()
-    local closest = nil
-    local closestDist = math.huge
-    local myChar = LocalPlayer.Character
-    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+--// Only players standing on the actual map count. Players parked in the
+--// menu lobby sit far below the playable area, so a Y floor relative to the
+--// local player filters them out. IsValidTarget also rejects unspawned/dead.
+local function GetClosestEnemyForKillAll(myRoot)
     if not myRoot then return nil end
+    local floorY = myRoot.Position.Y - Combat.Config.KillAllFloorMargin
+    local closest, closestDist = nil, math.huge
+
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Parent == Players and player.Team ~= LocalPlayer.Team then
+        if player ~= LocalPlayer and IsValidTarget(player) then
             local char = player.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
             local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-            if root and humanoid and humanoid.Health > 0 and char:IsDescendantOf(workspace) and not char:FindFirstChildOfClass("ForceField") then
+            if root and humanoid and humanoid.Health > 0
+                and char:IsDescendantOf(Workspace)
+                and root.Position.Y >= floorY then
                 local dist = (root.Position - myRoot.Position).Magnitude
                 if dist < closestDist then
                     closestDist = dist
@@ -717,15 +724,23 @@ end
 
 local function KillAllTick()
     if not killAllActive then return end
-    local target = GetClosestEnemyForKillAll()
-    if target and target.Character then
-        local targetRoot = target.Character:FindFirstChild("HumanoidRootPart")
-        local myChar = LocalPlayer.Character
-        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
-        if targetRoot and myRoot then
-            myRoot.CFrame = CFrame.new(targetRoot.Position - targetRoot.CFrame.LookVector * 5)
-            Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetRoot.Position)
-        end
+
+    local myChar = LocalPlayer.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+
+    local target = GetClosestEnemyForKillAll(myRoot)
+    local targetRoot = target and target.Character
+        and target.Character:FindFirstChild("HumanoidRootPart")
+
+    if targetRoot then
+        killAllRestored = false
+        myRoot.CFrame = CFrame.new(targetRoot.Position - targetRoot.CFrame.LookVector * 5)
+        Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetRoot.Position)
+    elseif killAllSavedPos and not killAllRestored then
+        --// nobody on the map yet: go back to where kill all was toggled on
+        myRoot.CFrame = killAllSavedPos
+        killAllRestored = true
     end
 end
 
@@ -733,9 +748,15 @@ local function SetKillAll(enabled)
     killAllActive = enabled
     Combat.Config.KillAll = enabled
     if enabled then
+        local myChar = LocalPlayer.Character
+        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        killAllSavedPos = myRoot and myRoot.CFrame or nil
+        killAllRestored = false
         if killAllConnection then killAllConnection:Disconnect() end
         killAllConnection = RunService.Heartbeat:Connect(KillAllTick)
     else
+        killAllSavedPos = nil
+        killAllRestored = false
         if killAllConnection then
             killAllConnection:Disconnect()
             killAllConnection = nil
