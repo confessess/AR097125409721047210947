@@ -236,7 +236,7 @@ function Gui:Init()
     Title.Size = UDim2.new(1, -140, 0, 26)
     Title.Position = UDim2.fromOffset(22, 10)
     Title.BackgroundTransparency = 1
-    Title.Text = "untitled arsenal script"
+    Title.Text = "unnamed arsenal script"
     Title.TextColor3 = WHITE
     Title.TextSize = 20
     Title.Font = Enum.Font.GothamBold
@@ -874,7 +874,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
         OptBtn.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
         OptBtn.BorderSizePixel = 0
         OptBtn.Text = "  " .. opt
-        OptBtn.TextColor3 = opt == selected and accent or 
+        OptBtn.TextColor3 = opt == selected and accent or LIGHT
         OptBtn.TextSize = 11
         OptBtn.Font = Enum.Font.GothamMedium
         OptBtn.TextXAlignment = Enum.TextXAlignment.Left
