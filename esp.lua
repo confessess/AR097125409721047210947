@@ -42,6 +42,9 @@ local PART_ALIASES = {
     { "RightUpperLeg", "RightLeg" },
 }
 
+local HEALTH_NAMES = { "Health", "HP", "HealthValue" }
+local MAX_HEALTH_NAMES = { "MaxHealth", "MaxHP" }
+
 --// ── helpers ────────────────────────────────────────────────────
 local function colorHex(c)
     return string.format("#%02X%02X%02X",
@@ -68,6 +71,46 @@ local function healthColor(ratio)
     if ratio <= 0.25 then return "#FF405B" end
     if ratio <= 0.65 then return "#FFD34D" end
     return "#55DDFF"
+end
+
+local function findNumber(container, names)
+    if not container then return nil end
+    for _, name in ipairs(names) do
+        local v = container:FindFirstChild(name)
+        if v and v:IsA("ValueBase") and typeof(v.Value) == "number" then
+            return v.Value
+        end
+    end
+    return nil
+end
+
+--// Arsenal keeps remote Humanoid.Health pinned and tracks damage on custom
+--// values. Take the lowest number we can find so a stale 100 never wins.
+local function readHealth(player, character, humanoid)
+    local cur = humanoid.Health
+    local max = math.max(1, humanoid.MaxHealth)
+
+    local containers = {
+        character:FindFirstChild("Status"),
+        character,
+        player:FindFirstChild("ScoreFolder"),
+        player,
+    }
+
+    for _, container in ipairs(containers) do
+        if container then
+            local value = findNumber(container, HEALTH_NAMES)
+            if value then
+                if value < cur then cur = value end
+                local mx = findNumber(container, MAX_HEALTH_NAMES)
+                if mx and mx > 0 then max = mx end
+                break
+            end
+        end
+    end
+
+    cur = math.clamp(cur, 0, max)
+    return cur, max
 end
 
 local function ensureGui()
@@ -213,9 +256,6 @@ local function createVisual(player)
 end
 
 --// ── highlights (boxes + chams share one set) ───────────────────
---// Each Highlight is parented to its own adornee part. That arrangement
---// survives part respawns, folder cleanup and Character re-parenting, and
---// it is the one the renderer actually honours.
 local function resolveParts(character)
     local parts = {}
     for _, alias in ipairs(PART_ALIASES) do
@@ -270,7 +310,7 @@ local function syncHighlights(v, character, enabled, boxes, chams)
                 hl.FillTransparency = 0.5
                 hl.OutlineTransparency = 0
                 hl.Enabled = false
-                hl.Parent = part          -- parented to its own adornee
+                hl.Parent = part
                 hl.Adornee = part
                 v.highlights[part] = hl
             end
@@ -289,7 +329,6 @@ local function syncHighlights(v, character, enabled, boxes, chams)
             pcall(function() hl:Destroy() end)
             v.highlights[part] = nil
         else
-            --// re-assert every frame; the game can strip Adornee on respawn
             if hl.Adornee ~= part then hl.Adornee = part end
             if not hl.Enabled then hl.Enabled = true end
         end
@@ -375,8 +414,7 @@ local function step()
                     .. escapeRichText(c.player.DisplayName) .. '</b></font>'
             end
             if cfg.Health then
-                local cur = math.max(0, c.humanoid.Health)
-                local max = math.max(1, c.humanoid.MaxHealth)
+                local cur, max = readHealth(c.player, c.character, c.humanoid)
                 local ratio = math.clamp(cur / max, 0, 1)
                 lines[#lines + 1] = '<font color="#AEB9C2">HP </font>'
                     .. '<font color="' .. healthColor(ratio) .. '"><b>'
