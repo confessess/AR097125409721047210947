@@ -1,5 +1,3 @@
-
-
 local ESP = {}
 ESP.__index = ESP
 
@@ -314,7 +312,7 @@ function ESP:Init(Gui)
         g.Content = scroll
 
         local y = g:CreateSection("ESP", 0)
-        y = g:CreateToggle("Enabled", false, function(s) 
+        y = g:CreateToggle("Enabled", false, function(s)
             ESP.Config.Enabled = s
             if not s then HideAllESP() HideAllChams() end
         end, y)
@@ -323,34 +321,18 @@ function ESP:Init(Gui)
         y = g:CreateToggle("Health", false, function(s) ESP.Config.Health = s end, y)
         y = g:CreateToggle("Distance", false, function(s) ESP.Config.Distance = s end, y)
         y = g:CreateToggle("Weapon", false, function(s) ESP.Config.Weapon = s end, y)
-        y = g:CreateToggle("Chams", false, function(s) 
+        y = g:CreateToggle("Chams", false, function(s)
             ESP.Config.Chams = s
             if not s then HideAllChams() end
         end, y)
         y = g:CreateToggle("Team Check", true, function(s) ESP.Config.TeamCheck = s end, y)
         y = g:CreateSlider("Render Distance", 10, 2500, 1000, function(v) ESP.Config.RenderDistance = v end, y)
 
-        -- Color Picker
+        -- Color wheel instead of preset buttons
         y = g:CreateSection("ESP Color", y + 10)
-
-        local colorPresets = {
-            {Name = "Red", Color = Color3.fromRGB(255, 0, 0)},
-            {Name = "Blue", Color = Color3.fromRGB(0, 100, 255)},
-            {Name = "Green", Color = Color3.fromRGB(0, 255, 0)},
-            {Name = "Purple", Color = Color3.fromRGB(150, 0, 255)},
-            {Name = "Pink", Color = Color3.fromRGB(255, 100, 200)},
-            {Name = "Orange", Color = Color3.fromRGB(255, 150, 0)},
-            {Name = "Yellow", Color = Color3.fromRGB(255, 255, 0)},
-            {Name = "Cyan", Color = Color3.fromRGB(0, 255, 255)},
-            {Name = "White", Color = Color3.fromRGB(255, 255, 255)},
-        }
-
-        for _, preset in ipairs(colorPresets) do
-            y = g:CreateButton(preset.Name, function()
-                ESP.Config.Color = preset.Color
-                
-            end, y)
-        end
+        y = g:CreateColorPicker("Color", ESP.Config.Color, function(c)
+            ESP.Config.Color = c
+        end, y)
 
         g.Content = originalContent
     end)
