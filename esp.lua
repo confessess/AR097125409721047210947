@@ -1,6 +1,6 @@
 --// ═══════════════════════════════════════════════════════════════
 --//  MODULE: esp.lua
---//  Highlight / Billboard / Beam ESP  (ported approach)
+--//  Highlight / Billboard / Beam ESP
 --// ═══════════════════════════════════════════════════════════════
 local ESP = {}
 ESP.__index = ESP
@@ -27,17 +27,22 @@ ESP.Config = {
 }
 
 local METERS_PER_STUD = 0.28
+-- Roblox renders ~31 Highlights at once; 6 parts x 4 players stays under it
+local MAX_HIGHLIGHT_PLAYERS = 4
+
 local Visuals = {}
 local TracerFolder = nil
+local HighlightFolder = nil
 local ESPGui = nil
 
-local BODY_PARTS = {
-    Head = true, Torso = true, UpperTorso = true, LowerTorso = true,
-    LeftArm = true, RightArm = true, LeftLeg = true, RightLeg = true,
-    LeftUpperArm = true, LeftLowerArm = true, LeftHand = true,
-    RightUpperArm = true, RightLowerArm = true, RightHand = true,
-    LeftUpperLeg = true, LeftLowerLeg = true, LeftFoot = true,
-    RightUpperLeg = true, RightLowerLeg = true, RightFoot = true,
+-- one box per body region, resolved to whichever rig variant exists
+local PART_ALIASES = {
+    { "Head" },
+    { "UpperTorso", "Torso" },
+    { "LeftUpperArm", "LeftArm" },
+    { "RightUpperArm", "RightArm" },
+    { "LeftUpperLeg", "LeftLeg" },
+    { "RightUpperLeg", "RightLeg" },
 }
 
 --// ── helpers ────────────────────────────────────────────────────
@@ -82,6 +87,17 @@ local function ensureGui()
     end
     ESPGui = gui
     return gui
+end
+
+-- Highlights go in Workspace, not a ScreenGui — that is the reliable parent
+local function ensureHighlightFolder()
+    if HighlightFolder and HighlightFolder.Parent then return HighlightFolder end
+    local existing = Workspace:FindFirstChild("ENI_ESP_Highlights")
+    if existing then existing:Destroy() end
+    HighlightFolder = Instance.new("Folder")
+    HighlightFolder.Name = "ENI_ESP_Highlights"
+    HighlightFolder.Parent = Workspace
+    return HighlightFolder
 end
 
 local function ensureTracerFolder()
@@ -141,7 +157,6 @@ local function destroyVisual(player)
     if v.billboard then pcall(function() v.billboard:Destroy() end) end
     if v.tracer then pcall(function() v.tracer:Destroy() end) end
     if v.tracerAttachment then pcall(function() v.tracerAttachment:Destroy() end) end
-    if v.chams then pcall(function() v.chams:Destroy() end) end
     for _, hl in pairs(v.highlights or {}) do pcall(function() hl:Destroy() end) end
 end
 
@@ -153,15 +168,12 @@ end
 local function hideVisual(v)
     if v.billboard then v.billboard.Enabled = false; v.billboard.Adornee = nil end
     if v.tracer then v.tracer.Enabled = false end
-    if v.chams then v.chams.Enabled = false end
     for _, hl in pairs(v.highlights or {}) do hl.Enabled = false end
 end
 
 local function createVisual(player)
     local v = Visuals[player]
     if v then return v end
-
-    local gui = ensureGui()
 
     local billboard = Instance.new("BillboardGui")
     billboard.Name = "ENI_Label_" .. player.Name
@@ -171,7 +183,7 @@ local function createVisual(player)
     billboard.LightInfluence = 0
     billboard.MaxDistance = 2500
     billboard.Enabled = false
-    billboard.Parent = gui
+    billboard.Parent = ensureGui()
 
     local label = Instance.new("TextLabel")
     label.Size = UDim2.fromScale(1, 1)
@@ -203,71 +215,90 @@ local function createVisual(player)
     v = {
         highlights = {},
         highlightCharacter = nil,
+        modeKey = nil,
         billboard = billboard,
         label = label,
         tracer = tracer,
         tracerAttachment = nil,
         tracerCharacter = nil,
-        chams = nil,
-        chamsCharacter = nil,
     }
     Visuals[player] = v
     return v
 end
 
-local function syncBodyHighlights(v, character, enabled)
+--// ── highlights (boxes + chams share one set) ───────────────────
+local function resolveParts(character)
+    local parts = {}
+    for _, alias in ipairs(PART_ALIASES) do
+        for _, name in ipairs(alias) do
+            local part = character:FindFirstChild(name)
+            if part and part:IsA("BasePart") then
+                parts[#parts + 1] = part
+                break
+            end
+        end
+    end
+    return parts
+end
+
+local function applyHighlightStyle(v, boxes, chams)
+    local key = (boxes and "b" or "") .. (chams and "c" or "")
+    if v.modeKey == key then return end
+    v.modeKey = key
+
+    local fill, outline
+    if boxes and chams then
+        fill, outline = 0.45, 0
+    elseif boxes then
+        fill, outline = 0.9, 0
+    else
+        fill, outline = 0.4, 1
+    end
+
+    local col = ESP.Config.Color
+    for _, hl in pairs(v.highlights) do
+        hl.FillColor = col
+        hl.OutlineColor = col
+        hl.FillTransparency = fill
+        hl.OutlineTransparency = outline
+    end
+end
+
+local function syncHighlights(v, character, enabled, boxes, chams)
     if v.highlightCharacter ~= character then
         for _, hl in pairs(v.highlights) do pcall(function() hl:Destroy() end) end
         v.highlights = {}
         v.highlightCharacter = character
+        v.modeKey = nil
+
         if character then
-            local gui = ensureGui()
-            for _, part in ipairs(character:GetChildren()) do
-                if part:IsA("BasePart") and BODY_PARTS[part.Name] then
-                    local hl = Instance.new("Highlight")
-                    hl.Name = "ENI_Body_" .. part.Name
-                    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                    hl.FillColor = ESP.Config.Color
-                    hl.FillTransparency = 0.85
-                    hl.OutlineColor = ESP.Config.Color
-                    hl.OutlineTransparency = 0
-                    hl.Adornee = part
-                    hl.Enabled = false
-                    hl.Parent = gui
-                    v.highlights[part] = hl
-                end
+            local folder = ensureHighlightFolder()
+            for _, part in ipairs(resolveParts(character)) do
+                local hl = Instance.new("Highlight")
+                hl.Name = "ENI_Body_" .. part.Name
+                hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                hl.Adornee = part
+                hl.Enabled = false
+                hl.Parent = folder
+                v.highlights[part] = hl
             end
         end
     end
+
+    if not enabled then
+        for _, hl in pairs(v.highlights) do hl.Enabled = false end
+        return
+    end
+
+    applyHighlightStyle(v, boxes, chams)
     for part, hl in pairs(v.highlights) do
         if not part.Parent then
             pcall(function() hl:Destroy() end)
             v.highlights[part] = nil
         else
-            hl.Enabled = enabled == true
+            hl.Enabled = true
         end
     end
-end
-
-local function syncChams(v, character, enabled)
-    if v.chamsCharacter ~= character then
-        if v.chams then pcall(function() v.chams:Destroy() end) v.chams = nil end
-        v.chamsCharacter = character
-        if character then
-            local hl = Instance.new("Highlight")
-            hl.Name = "ENI_Chams"
-            hl.DepthMode = Enum.HighlightDepthMode.Occluded
-            hl.FillColor = ESP.Config.Color
-            hl.FillTransparency = 0.45
-            hl.OutlineColor = ESP.Config.Color
-            hl.OutlineTransparency = 1
-            hl.Adornee = character
-            hl.Enabled = false
-            hl.Parent = ensureGui()
-            v.chams = hl
-        end
-    end
-    if v.chams then v.chams.Enabled = enabled == true end
 end
 
 --// ── main loop ──────────────────────────────────────────────────
@@ -288,7 +319,6 @@ local function step()
 
     local localChar = LocalPlayer.Character
     local localRoot = localChar and localChar:FindFirstChild("HumanoidRootPart")
-    local camPos = cam.CFrame.Position
     local sourceAttachment = nil
     if cfg.Tracers and localChar and localRoot then
         sourceAttachment = ensureSourceAttachment(localChar)
@@ -297,77 +327,103 @@ local function step()
     end
 
     local hex = colorHex(cfg.Color)
+    local candidates = {}
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
-            local v = createVisual(player)
             local character = player.Character
             local root = character and character:FindFirstChild("HumanoidRootPart")
             local head = character and character:FindFirstChild("Head")
             local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
 
-            local alive = root and head and humanoid and humanoid.Health > 0
-            local sameTeam = cfg.TeamCheck and player.Team == LocalPlayer.Team
+            local alive = root and humanoid and humanoid.Health > 0
+            -- Arsenal is FFA: Team is nil for everyone, so nil must not match
+            local sameTeam = cfg.TeamCheck
+                and LocalPlayer.Team ~= nil
+                and player.Team == LocalPlayer.Team
             local studs = (alive and localRoot)
                 and (root.Position - localRoot.Position).Magnitude or math.huge
             local ready = alive and not sameTeam and studs <= cfg.RenderDistance
 
-            syncBodyHighlights(v, character, ready and cfg.Boxes)
-            syncChams(v, character, ready and cfg.Chams)
-            v.billboard.Adornee = ready and head or nil
+            candidates[#candidates + 1] = {
+                player = player,
+                character = character,
+                head = head,
+                humanoid = humanoid,
+                studs = studs,
+                ready = ready,
+            }
+        end
+    end
 
-            if ready then
-                local meters = studs * METERS_PER_STUD
-                local lines = {}
-                if cfg.Names then
-                    lines[#lines + 1] = '<font color="' .. hex .. '"><b>'
-                        .. escapeRichText(player.DisplayName) .. '</b></font>'
-                end
-                if cfg.Health then
-                    local cur = math.max(0, humanoid.Health)
-                    local max = math.max(1, humanoid.MaxHealth)
-                    local ratio = math.clamp(cur / max, 0, 1)
-                    lines[#lines + 1] = '<font color="#AEB9C2">HP </font>'
-                        .. '<font color="' .. healthColor(ratio) .. '"><b>'
-                        .. math.floor(cur + 0.5) .. '</b></font>'
-                        .. '<font color="#AEB9C2">/</font>'
-                        .. '<font color="#55DDFF"><b>' .. math.floor(max + 0.5) .. '</b></font>'
-                end
-                if cfg.Weapon then
-                    local tool = character:FindFirstChildOfClass("Tool")
-                    lines[#lines + 1] = '<font color="#E7EDF2">'
-                        .. escapeRichText(tool and tool.Name or "None") .. '</font>'
-                end
-                if cfg.Distance and meters >= 10 then
-                    lines[#lines + 1] = '<font color="#E7EDF2">' .. formatMeters(meters) .. '</font>'
-                end
+    table.sort(candidates, function(a, b) return a.studs < b.studs end)
 
-                v.label.Text = table.concat(lines, "\n")
-                v.label.TextColor3 = cfg.Color
-                v.billboard.Enabled = #lines > 0
+    local highlightBudget = MAX_HIGHLIGHT_PLAYERS
 
-                if v.tracerCharacter ~= character
-                    or not v.tracerAttachment
-                    or not v.tracerAttachment.Parent then
-                    if v.tracerAttachment then
-                        pcall(function() v.tracerAttachment:Destroy() end)
-                    end
-                    v.tracerAttachment = createChestAttachment(character, "ENI_TracerTarget")
-                    v.tracerCharacter = character
-                end
+    for _, c in ipairs(candidates) do
+        local v = createVisual(c.player)
+        local ready = c.ready
+        local highlightOn = false
 
-                if cfg.Tracers and meters >= 10 and sourceAttachment and v.tracerAttachment then
-                    v.tracer.Color = ColorSequence.new(cfg.Color)
-                    v.tracer.Attachment0 = sourceAttachment
-                    v.tracer.Attachment1 = v.tracerAttachment
-                    v.tracer.Enabled = true
-                else
-                    v.tracer.Enabled = false
+        if ready and (cfg.Boxes or cfg.Chams) and highlightBudget > 0 then
+            highlightBudget = highlightBudget - 1
+            highlightOn = true
+        end
+
+        syncHighlights(v, c.character, highlightOn, cfg.Boxes, cfg.Chams)
+        v.billboard.Adornee = (ready and c.head) or nil
+
+        if ready then
+            local meters = c.studs * METERS_PER_STUD
+            local lines = {}
+            if cfg.Names then
+                lines[#lines + 1] = '<font color="' .. hex .. '"><b>'
+                    .. escapeRichText(c.player.DisplayName) .. '</b></font>'
+            end
+            if cfg.Health then
+                local cur = math.max(0, c.humanoid.Health)
+                local max = math.max(1, c.humanoid.MaxHealth)
+                local ratio = math.clamp(cur / max, 0, 1)
+                lines[#lines + 1] = '<font color="#AEB9C2">HP </font>'
+                    .. '<font color="' .. healthColor(ratio) .. '"><b>'
+                    .. math.floor(cur + 0.5) .. '</b></font>'
+                    .. '<font color="#AEB9C2">/</font>'
+                    .. '<font color="#55DDFF"><b>' .. math.floor(max + 0.5) .. '</b></font>'
+            end
+            if cfg.Weapon then
+                local tool = c.character:FindFirstChildOfClass("Tool")
+                lines[#lines + 1] = '<font color="#E7EDF2">'
+                    .. escapeRichText(tool and tool.Name or "None") .. '</font>'
+            end
+            if cfg.Distance and meters >= 10 then
+                lines[#lines + 1] = '<font color="#E7EDF2">' .. formatMeters(meters) .. '</font>'
+            end
+
+            v.label.Text = table.concat(lines, "\n")
+            v.label.TextColor3 = cfg.Color
+            v.billboard.Enabled = #lines > 0
+
+            if v.tracerCharacter ~= c.character
+                or not v.tracerAttachment
+                or not v.tracerAttachment.Parent then
+                if v.tracerAttachment then
+                    pcall(function() v.tracerAttachment:Destroy() end)
                 end
+                v.tracerAttachment = createChestAttachment(c.character, "ENI_TracerTarget")
+                v.tracerCharacter = c.character
+            end
+
+            if cfg.Tracers and meters >= 10 and sourceAttachment and v.tracerAttachment then
+                v.tracer.Color = ColorSequence.new(cfg.Color)
+                v.tracer.Attachment0 = sourceAttachment
+                v.tracer.Attachment1 = v.tracerAttachment
+                v.tracer.Enabled = true
             else
-                v.billboard.Enabled = false
                 v.tracer.Enabled = false
             end
+        else
+            v.billboard.Enabled = false
+            v.tracer.Enabled = false
         end
     end
 end
@@ -399,10 +455,6 @@ function ESP.SetColor(c)
     for _, v in pairs(Visuals) do
         v.tracer.Color = ColorSequence.new(c)
         v.label.TextColor3 = c
-        if v.chams then
-            v.chams.FillColor = c
-            v.chams.OutlineColor = c
-        end
         for _, hl in pairs(v.highlights) do
             hl.FillColor = c
             hl.OutlineColor = c
