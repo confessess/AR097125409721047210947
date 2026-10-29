@@ -1,6 +1,6 @@
 --// ═══════════════════════════════════════════════════════════════
 --//  MODULE: esp.lua
---//  Drawing boxes + material chams + Billboard labels + Beam tracers
+--//  Bounding box + full-body material chams + Billboard labels
 --// ═══════════════════════════════════════════════════════════════
 local ESP = {}
 ESP.__index = ESP
@@ -9,6 +9,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local CoreGui = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LocalPlayer = Players.LocalPlayer
 
@@ -21,28 +22,32 @@ ESP.Config = {
     Distance = false,
     Weapon = false,
     Tracers = false,
-    TeamCheck = true,
+    TeamCheck = false,
     RenderDistance = 1000,
     Color = Color3.fromRGB(255, 0, 45),
     ChamsTransparency = 0,
     ChamsMaterial = "ForceField",
+    Debug = true,
 }
 
 local METERS_PER_STUD = 0.28
-local BOX_SLOTS = 6
 
 local Visuals = {}
 local TracerFolder = nil
 local ESPGui = nil
 
-local PART_ALIASES = {
-    { "Head" },
-    { "UpperTorso", "Torso" },
-    { "LeftUpperArm", "LeftArm" },
-    { "RightUpperArm", "RightArm" },
-    { "LeftUpperLeg", "LeftLeg" },
-    { "RightUpperLeg", "RightLeg" },
-}
+local Debug = { nextAt = 0, errors = {}, dumped = {} }
+
+local function dbg(...)
+    if not ESP.Config.Debug then return end
+    print("[ENI ESP]", ...)
+end
+
+local function dbgError(key, err)
+    if Debug.errors[key] then return end
+    Debug.errors[key] = true
+    warn("[ENI ESP] error in " .. key .. ": " .. tostring(err))
+end
 
 --// ── helpers ────────────────────────────────────────────────────
 local function colorHex(c)
@@ -72,22 +77,74 @@ local function healthColor(ratio)
     return "#55DDFF"
 end
 
---// Arsenal stores live health on Player.NRPBS, not on the Humanoid
-local function readHealth(player, humanoid)
-    local folder = player:FindFirstChild("NRPBS")
-    if folder then
-        local cur = folder:FindFirstChild("Health")
-        if cur and cur:IsA("ValueBase") and typeof(cur.Value) == "number" then
-            local maxValue = folder:FindFirstChild("MaxHealth")
-                or folder:FindFirstChild("OMaxHealth")
-            local max = (maxValue and maxValue:IsA("ValueBase")
-                and typeof(maxValue.Value) == "number" and maxValue.Value) or 100
-            max = math.max(1, max)
-            return math.clamp(cur.Value, 0, max), max
+--// health lives on custom values, never trust a pinned Humanoid alone
+local function readHealth(player, character, humanoid)
+    local lowest = humanoid.Health
+    local max = math.max(1, humanoid.MaxHealth)
+
+    local function consider(container, maxNames)
+        if not container then return end
+        local v = container:FindFirstChild("Health")
+        if v and v:IsA("ValueBase") and typeof(v.Value) == "number" then
+            if v.Value < lowest then lowest = v.Value end
+        end
+        for _, name in ipairs(maxNames or {}) do
+            local m = container:FindFirstChild(name)
+            if m and m:IsA("ValueBase") and typeof(m.Value) == "number" and m.Value > 0 then
+                max = m.Value
+                break
+            end
         end
     end
-    local max = math.max(1, humanoid.MaxHealth)
-    return math.clamp(humanoid.Health, 0, max), max
+
+    consider(player:FindFirstChild("NRPBS"), { "MaxHealth", "OMaxHealth" })
+    consider(character:FindFirstChild("NRPBS"), { "MaxHealth", "OMaxHealth" })
+    consider(character:FindFirstChild("Status"))
+    consider(character)
+    consider(player:FindFirstChild("ScoreFolder"))
+    consider(player)
+
+    return math.clamp(lowest, 0, max), max
+end
+
+--// remote weapons are not always a Tool child; walk every plausible holder
+local function readWeapon(player, character)
+    local tool = character:FindFirstChildOfClass("Tool")
+    if tool then return tool.Name end
+
+    local gun = character:FindFirstChild("Gun")
+    if gun then
+        if gun:IsA("Model") then return gun.Name end
+        local parentModel = gun.Parent
+        if parentModel and parentModel:IsA("Model") and parentModel.Name ~= player.Name then
+            return parentModel.Name
+        end
+        return "Gun"
+    end
+
+    for _, child in ipairs(character:GetChildren()) do
+        if child.Name:sub(1, 6) == "HWRAP_" then
+            local g = child:FindFirstChild("Gun")
+            return g and g.Name or child.Name
+        end
+    end
+
+    for _, name in ipairs({ "Backpack", "PlayerGui" }) do
+        local holder = player:FindFirstChild(name)
+        if holder then
+            local t = holder:FindFirstChildOfClass("Tool")
+            if t then return t.Name end
+        end
+    end
+
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj.Name:sub(1, 6) == "HWRAP_" then
+            local g = obj:FindFirstChild("Gun")
+            if g then return g.Name end
+        end
+    end
+
+    return nil
 end
 
 local function ensureGui()
@@ -157,13 +214,17 @@ end
 
 --// ── object lifecycle ───────────────────────────────────────────
 local function newSquare(filled)
-    local d = Drawing.new("Square")
-    d.Filled = filled
-    d.Thickness = 1
-    d.Transparency = 1
-    d.Color = ESP.Config.Color
-    d.Visible = false
-    return d
+    if not Drawing then return nil end
+    local ok, d = pcall(function()
+        local s = Drawing.new("Square")
+        s.Filled = filled
+        s.Thickness = 1
+        s.Transparency = 1
+        s.Color = ESP.Config.Color
+        s.Visible = false
+        return s
+    end)
+    return ok and d or nil
 end
 
 local function destroyVisual(player)
@@ -173,20 +234,13 @@ local function destroyVisual(player)
     if v.billboard then pcall(function() v.billboard:Destroy() end) end
     if v.tracer then pcall(function() v.tracer:Destroy() end) end
     if v.tracerAttachment then pcall(function() v.tracerAttachment:Destroy() end) end
-    for _, d in pairs(v.boxes or {}) do pcall(function() d:Remove() end) end
-    for _, d in pairs(v.fills or {}) do pcall(function() d:Remove() end) end
+    if v.box then pcall(function() v.box:Remove() end) end
+    if v.fill then pcall(function() v.fill:Remove() end) end
 end
 
 local function clearAll()
     for player in pairs(Visuals) do destroyVisual(player) end
     clearSourceAttachment()
-end
-
-local function hideVisual(v)
-    if v.billboard then v.billboard.Enabled = false; v.billboard.Adornee = nil end
-    if v.tracer then v.tracer.Enabled = false end
-    for _, d in pairs(v.boxes or {}) do d.Visible = false end
-    for _, d in pairs(v.fills or {}) do d.Visible = false end
 end
 
 local function createVisual(player)
@@ -231,8 +285,8 @@ local function createVisual(player)
     tracer.Parent = ensureTracerFolder()
 
     v = {
-        boxes = {},
-        fills = {},
+        box = newSquare(false),
+        fill = newSquare(true),
         chamData = {},
         chamCharacter = nil,
         billboard = billboard,
@@ -241,57 +295,36 @@ local function createVisual(player)
         tracerAttachment = nil,
         tracerCharacter = nil,
     }
-    for i = 1, BOX_SLOTS do
-        v.boxes[i] = newSquare(false)
-        v.fills[i] = newSquare(true)
-    end
     Visuals[player] = v
     return v
 end
 
---// ── parts + screen projection ──────────────────────────────────
-local function resolveParts(character)
-    local parts = {}
-    for _, alias in ipairs(PART_ALIASES) do
-        for _, name in ipairs(alias) do
-            local part = character:FindFirstChild(name)
-            if part and part:IsA("BasePart") then
-                parts[#parts + 1] = part
-                break
-            end
-        end
-    end
-    return parts
+--// ── single bounding box for the whole character ────────────────
+local function characterScreenRect(character, cam)
+    local cf, size
+    local ok = pcall(function()
+        local c, s = character:GetBoundingBox()
+        cf, size = c, s
+    end)
+    if not ok or not cf then return nil end
+
+    local top = cf.Position + Vector3.new(0, size.Y * 0.5, 0)
+    local bottom = cf.Position - Vector3.new(0, size.Y * 0.5, 0)
+
+    local topScreen = cam:WorldToViewportPoint(top)
+    local bottomScreen = cam:WorldToViewportPoint(bottom)
+    if topScreen.Z <= 0 or bottomScreen.Z <= 0 then return nil end
+
+    local height = math.abs(bottomScreen.Y - topScreen.Y)
+    if height < 4 then return nil end
+    local width = height * 0.5
+    local centerX = (topScreen.X + bottomScreen.X) * 0.5
+
+    return Vector2.new(centerX - width * 0.5, math.min(topScreen.Y, bottomScreen.Y)),
+        Vector2.new(width, height)
 end
 
---// projects the 8 corners of a part and returns its screen rect
-local function partScreenRect(part, cam)
-    local cf = part.CFrame
-    local half = part.Size * 0.5
-    local minX, minY = math.huge, math.huge
-    local maxX, maxY = -math.huge, -math.huge
-
-    for xi = -1, 1, 2 do
-        for yi = -1, 1, 2 do
-            for zi = -1, 1, 2 do
-                local world = cf * Vector3.new(half.X * xi, half.Y * yi, half.Z * zi)
-                local sp, onScreen = cam:WorldToViewportPoint(world)
-                if sp.Z <= 0 then return nil end
-                if sp.X < minX then minX = sp.X end
-                if sp.X > maxX then maxX = sp.X end
-                if sp.Y < minY then minY = sp.Y end
-                if sp.Y > maxY then maxY = sp.Y end
-                _ = onScreen
-            end
-        end
-    end
-
-    local w, h = maxX - minX, maxY - minY
-    if w < 1 or h < 1 then return nil end
-    return Vector2.new(minX, minY), Vector2.new(w, h)
-end
-
---// ── chams (material override) ──────────────────────────────────
+--// ── chams over every body part ─────────────────────────────────
 local function clearChams(v)
     for part, data in pairs(v.chamData) do
         if part and part.Parent then
@@ -307,13 +340,21 @@ local function clearChams(v)
     v.chamCharacter = nil
 end
 
+local function collectParts(character)
+    local parts = {}
+    for _, obj in ipairs(character:GetDescendants()) do
+        if obj:IsA("BasePart") then parts[#parts + 1] = obj end
+    end
+    return parts
+end
+
 local function syncChams(v, character, enabled)
     if v.chamCharacter ~= character then
         clearChams(v)
         if enabled and character then
             v.chamCharacter = character
             local mat = Enum.Material[ESP.Config.ChamsMaterial] or Enum.Material.ForceField
-            for _, part in ipairs(resolveParts(character)) do
+            for _, part in ipairs(collectParts(character)) do
                 v.chamData[part] = {
                     Material = part.Material,
                     Color = part.Color,
@@ -334,7 +375,6 @@ local function syncChams(v, character, enabled)
         return
     end
 
-    --// re-assert, the game rewrites materials on respawn/cosmetic changes
     local mat = Enum.Material[ESP.Config.ChamsMaterial] or Enum.Material.ForceField
     for part in pairs(v.chamData) do
         if part.Parent then
@@ -355,7 +395,12 @@ local function step()
     end
 
     if not cfg.Enabled then
-        for _, v in pairs(Visuals) do hideVisual(v) end
+        for _, v in pairs(Visuals) do
+            if v.box then v.box.Visible = false end
+            if v.fill then v.fill.Visible = false end
+            if v.billboard then v.billboard.Enabled = false; v.billboard.Adornee = nil end
+            if v.tracer then v.tracer.Enabled = false end
+        end
         return
     end
 
@@ -371,7 +416,13 @@ local function step()
         clearSourceAttachment()
     end
 
+    local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
+    local ffa = wkspc and wkspc:FindFirstChild("FFA")
+    local isFFA = ffa and ffa.Value
+
     local hex = colorHex(cfg.Color)
+    local readyCount = 0
+    local report = {}
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
@@ -381,47 +432,72 @@ local function step()
             local head = character and character:FindFirstChild("Head")
             local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
 
-            local alive = root and humanoid and humanoid.Health > 0
-            local sameTeam = cfg.TeamCheck
-                and LocalPlayer.Team ~= nil
-                and player.Team == LocalPlayer.Team
-            local studs = (alive and localRoot)
-                and (root.Position - localRoot.Position).Magnitude or math.huge
-            local ready = alive and not sameTeam and studs <= cfg.RenderDistance
-
-            --// boxes + fill
-            local parts = (ready and (cfg.Boxes or cfg.Chams)) and resolveParts(character) or {}
-            for i = 1, BOX_SLOTS do
-                local box, fill = v.boxes[i], v.fills[i]
-                local part = parts[i]
-                local rect, size = nil, nil
-                if part then rect, size = partScreenRect(part, cam) end
-
-                if rect and cfg.Boxes then
-                    box.Position = rect
-                    box.Size = size
-                    box.Color = cfg.Color
-                    box.Visible = true
-                else
-                    box.Visible = false
-                end
-
-                if rect and cfg.Chams then
-                    fill.Position = rect
-                    fill.Size = size
-                    fill.Color = cfg.Color
-                    fill.Transparency = 0.55
-                    fill.Visible = true
-                else
-                    fill.Visible = false
-                end
+            local reason = nil
+            if not character then
+                reason = "no character"
+            elseif not root then
+                reason = "no root"
+            elseif not humanoid then
+                reason = "no humanoid"
+            elseif humanoid.Health <= 0 then
+                reason = "dead"
             end
 
-            syncChams(v, character, ready and cfg.Chams)
+            local studs = math.huge
+            if not reason then
+                if localRoot then
+                    studs = (root.Position - localRoot.Position).Magnitude
+                else
+                    reason = "no local root"
+                end
+            end
+            if not reason and cfg.TeamCheck and not isFFA
+                and LocalPlayer.Team ~= nil
+                and player.Team == LocalPlayer.Team then
+                reason = "same team"
+            end
+            if not reason and studs > cfg.RenderDistance then
+                reason = string.format("too far (%.0f)", studs)
+            end
 
-            v.billboard.Adornee = (ready and head) or nil
+            local ready = reason == nil
+            if ready then readyCount = readyCount + 1 end
+            report[#report + 1] = string.format("%s: %s", player.Name, reason or "READY")
 
             if ready then
+                local rect, size = nil, nil
+                if cfg.Boxes or cfg.Chams then
+                    local okRect, r, s = pcall(characterScreenRect, character, cam)
+                    if okRect then rect, size = r, s end
+                end
+
+                if v.box then
+                    if rect and cfg.Boxes then
+                        v.box.Position = rect
+                        v.box.Size = size
+                        v.box.Color = cfg.Color
+                        v.box.Visible = true
+                    else
+                        v.box.Visible = false
+                    end
+                end
+                if v.fill then
+                    if rect and cfg.Chams then
+                        v.fill.Position = rect
+                        v.fill.Size = size
+                        v.fill.Color = cfg.Color
+                        v.fill.Transparency = 0.6
+                        v.fill.Visible = true
+                    else
+                        v.fill.Visible = false
+                    end
+                end
+
+                local okChams, chamsErr = pcall(syncChams, v, character, cfg.Chams)
+                if not okChams then dbgError("syncChams", chamsErr) end
+
+                v.billboard.Adornee = head
+
                 local meters = studs * METERS_PER_STUD
                 local lines = {}
                 if cfg.Names then
@@ -429,7 +505,7 @@ local function step()
                         .. escapeRichText(player.DisplayName) .. '</b></font>'
                 end
                 if cfg.Health then
-                    local cur, max = readHealth(player, humanoid)
+                    local cur, max = readHealth(player, character, humanoid)
                     local ratio = math.clamp(cur / max, 0, 1)
                     lines[#lines + 1] = '<font color="#AEB9C2">HP </font>'
                         .. '<font color="' .. healthColor(ratio) .. '"><b>'
@@ -438,9 +514,17 @@ local function step()
                         .. '<font color="#55DDFF"><b>' .. math.floor(max + 0.5) .. '</b></font>'
                 end
                 if cfg.Weapon then
-                    local tool = character:FindFirstChildOfClass("Tool")
+                    local weapon = readWeapon(player, character)
+                    if not weapon and cfg.Debug and not Debug.dumped[player] then
+                        Debug.dumped[player] = true
+                        local names = {}
+                        for _, c in ipairs(character:GetChildren()) do
+                            names[#names + 1] = c.Name .. "(" .. c.ClassName .. ")"
+                        end
+                        dbg("children of " .. player.Name .. ": " .. table.concat(names, ", "))
+                    end
                     lines[#lines + 1] = '<font color="#E7EDF2">'
-                        .. escapeRichText(tool and tool.Name or "None") .. '</font>'
+                        .. escapeRichText(weapon or "None") .. '</font>'
                 end
                 if cfg.Distance and meters >= 10 then
                     lines[#lines + 1] = '<font color="#E7EDF2">' .. formatMeters(meters) .. '</font>'
@@ -469,14 +553,31 @@ local function step()
                     v.tracer.Enabled = false
                 end
             else
+                if v.box then v.box.Visible = false end
+                if v.fill then v.fill.Visible = false end
+                if next(v.chamData) then clearChams(v) end
                 v.billboard.Enabled = false
                 v.tracer.Enabled = false
             end
         end
     end
+
+    local now = os.clock()
+    if cfg.Debug and now >= Debug.nextAt then
+        Debug.nextAt = now + 2
+        dbg(string.format("players=%d ready=%d drawing=%s ffa=%s",
+            #Players:GetPlayers() - 1, readyCount, tostring(Drawing ~= nil), tostring(isFFA)))
+        for i = 1, math.min(#report, 8) do dbg("  " .. report[i]) end
+        local self = LocalPlayer:FindFirstChild("NRPBS")
+        local h = self and self:FindFirstChild("Health")
+        dbg("  self NRPBS.Health = " .. tostring(h and h.Value))
+    end
 end
 
-RunService.RenderStepped:Connect(step)
+RunService.RenderStepped:Connect(function()
+    local ok, err = pcall(step)
+    if not ok then dbgError("step", err) end
+end)
 
 Players.PlayerRemoving:Connect(destroyVisual)
 
@@ -503,8 +604,8 @@ function ESP.SetColor(c)
     for _, v in pairs(Visuals) do
         v.tracer.Color = ColorSequence.new(c)
         v.label.TextColor3 = c
-        for _, d in pairs(v.boxes) do d.Color = c end
-        for _, d in pairs(v.fills) do d.Color = c end
+        if v.box then v.box.Color = c end
+        if v.fill then v.fill.Color = c end
     end
 end
 
@@ -534,6 +635,7 @@ function ESP:Init(Gui)
         y = g:CreateSlider("Render Distance", 10, 2500, ESP.Config.RenderDistance, function(v)
             ESP.Config.RenderDistance = v
         end, y)
+        y = g:CreateToggle("Debug", ESP.Config.Debug, function(s) ESP.Config.Debug = s end, y)
 
         y = g:CreateSection("ESP Color", y + 10)
         y = g:CreateColorPicker("Color", ESP.Config.Color, function(c) ESP.SetColor(c) end, y)
