@@ -16,6 +16,8 @@ GunMods.Config = {
     InfiniteAmmo = false,
     FastReload = false,
     AlwaysAuto = false,
+    NoMuzzleFlash = false,
+    HideFlashMesh = false,
     FireRate = 0.03,
 
     ChamsEnabled = false,
@@ -28,9 +30,6 @@ GunMods.Config = {
     ChamArms = false,
     ArmsColor = Color3.fromRGB(19, 0, 255),
     ArmsTransparency = 0.5,
-
-    MuzzleBlock = false,
-    MuzzleHideMesh = false,
 }
 
 -- Gun mods state tracking
@@ -298,7 +297,7 @@ local function MuzzleProcess(inst)
         if IsFlashEmitter(inst) then LockParticle(inst) end
     elseif inst:IsA("PointLight") or inst:IsA("SpotLight") then
         if UnderFlashPart(inst) then LockLight(inst) end
-    elseif GunMods.Config.MuzzleHideMesh and inst:IsA("BasePart") then
+    elseif GunMods.Config.HideFlashMesh and inst:IsA("BasePart") then
         if inst.Name == "Flash" or inst.Name == "MuzzleFlash" then LockMesh(inst) end
     end
 end
@@ -328,7 +327,7 @@ local function MuzzleEnable()
                 if inst.Rate ~= 0 then inst.Rate = 0 end
             elseif inst:IsA("Light") then
                 if inst.Enabled then inst.Enabled = false end
-            elseif inst:IsA("BasePart") and GunMods.Config.MuzzleHideMesh then
+            elseif inst:IsA("BasePart") and GunMods.Config.HideFlashMesh then
                 inst.LocalTransparencyModifier = 1
             end
         end
@@ -701,20 +700,8 @@ function GunMods:Init(Gui)
             SetAlwaysAuto(state)
         end, y)
 
-        y = g:CreateSlider("Fire Rate", 1, 200, math.floor(GunMods.Config.FireRate * 1000), function(val)
-            GunMods.Config.FireRate = val / 1000
-            if GunMods.Config.RapidFire then
-                RestoreMod("RapidFire")
-                ModStates.RapidFire.Active = true
-                ApplySingleMod("RapidFire")
-            end
-        end, y)
-
-        -- Muzzle flash
-        y = g:CreateSection("Muzzle Flash", y + 10)
-
-        y = g:CreateToggle("Block Muzzle Flash", false, function(state)
-            GunMods.Config.MuzzleBlock = state
+        y = g:CreateToggle("No Muzzle Flash", false, function(state)
+            GunMods.Config.NoMuzzleFlash = state
             if state then
                 MuzzleEnable()
             else
@@ -723,9 +710,18 @@ function GunMods:Init(Gui)
         end, y)
 
         y = g:CreateToggle("Hide Flash Mesh", false, function(state)
-            GunMods.Config.MuzzleHideMesh = state
-            if state and GunMods.Config.MuzzleBlock then
+            GunMods.Config.HideFlashMesh = state
+            if state and GunMods.Config.NoMuzzleFlash then
                 MuzzleSweep()
+            end
+        end, y)
+
+        y = g:CreateSlider("Fire Rate", 1, 200, math.floor(GunMods.Config.FireRate * 1000), function(val)
+            GunMods.Config.FireRate = val / 1000
+            if GunMods.Config.RapidFire then
+                RestoreMod("RapidFire")
+                ModStates.RapidFire.Active = true
+                ApplySingleMod("RapidFire")
             end
         end, y)
 
@@ -810,7 +806,7 @@ function GunMods:Init(Gui)
         if GunMods.Config.RapidFire then ModStates.RapidFire.Active = true ApplySingleMod("RapidFire") end
         if GunMods.Config.FastReload then ModStates.FastReload.Active = true ApplySingleMod("FastReload") end
         if GunMods.Config.InfiniteAmmo then ApplyInfiniteAmmo() end
-        if GunMods.Config.MuzzleBlock then MuzzleSweep() end
+        if GunMods.Config.NoMuzzleFlash then MuzzleSweep() end
         if GunMods.Config.ChamsEnabled or GunMods.Config.ChamArms then
             task.wait(1)
             StartChamsLoop()
