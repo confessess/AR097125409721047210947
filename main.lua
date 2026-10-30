@@ -7,7 +7,7 @@ local function LoadModule(fileName)
     end)
 
     if not ok or result == nil then
-        warn("[ENI] Failed to load module: " .. fileName)
+        warn(" Failed to load module: " .. fileName)
         return nil
     end
 
@@ -16,7 +16,7 @@ end
 
 local GuiModule = LoadModule("gui.lua")
 if not GuiModule or type(GuiModule.Init) ~= "function" then
-    warn("[ENI] gui.lua did not return a valid module. Aborting hub init.")
+    warn(" gui.lua did not return a valid module. Aborting hub init.")
     return
 end
 
@@ -30,7 +30,7 @@ local ViewmodelCustomizerModule = LoadModule("weaponchanger.lua")
 
 local Gui = GuiModule:Init()
 if not Gui or type(Gui.CreateTab) ~= "function" then
-    warn("[ENI] GUI failed to initialize. Aborting hub init.")
+    warn(" GUI failed to initialize. Aborting hub init.")
     return
 end
 
@@ -412,7 +412,7 @@ Gui:SetTabRebuild("Settings", function(g)
     end)
 
     if not ok then
-        warn("[ENI] Settings tab build error: " .. tostring(err))
+        warn(" Settings tab build error: " .. tostring(err))
         local fallback = Instance.new("TextLabel")
         fallback.Size = UDim2.new(1, 0, 0, 22)
         fallback.Position = UDim2.fromOffset(0, 60)
