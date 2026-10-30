@@ -14,7 +14,7 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 -- cached to disk and served through getcustomasset.
 -- Override the source at runtime with: getgenv().BlackoutBgUrl = "https://..."
 local BACKGROUND_IMAGE_URL = (getgenv and getgenv().BlackoutBgUrl)
-    or "https://files.catbox.moe/0jcfy9.png"
+    or "https://files.catbox.moe/keejy7.png"
 local ASSET_DIR = "blackout_assets"
 
 --// Colors — Huohuo (green) palette
