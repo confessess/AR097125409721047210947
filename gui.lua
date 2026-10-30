@@ -9,32 +9,35 @@ local RunService = game:GetService("RunService")
 local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
---// Colors
-local BLACK      = Color3.fromRGB(0, 0, 0)
-local BACKGROUND = Color3.fromRGB(6, 6, 6)
-local DARK_PANEL = Color3.fromRGB(14, 14, 14)
-local RED        = Color3.fromRGB(145, 20, 25)
-local RED_BRIGHT = Color3.fromRGB(195, 28, 35)
-local RED_DARK   = Color3.fromRGB(65, 25, 27)
-local SELECTED   = Color3.fromRGB(45, 15, 17)
-local HOVER      = Color3.fromRGB(18, 7, 8)
-local WHITE      = Color3.fromRGB(255, 255, 255)
-local LIGHT      = Color3.fromRGB(225, 225, 225)
-local GRAY       = Color3.fromRGB(150, 150, 150)
-local BORDER     = Color3.fromRGB(65, 25, 27)
+--// Background image (content panel only)
+local BACKGROUND_IMAGE = "https://files.catbox.moe/60cyzp.png"
 
---// Per-module accent colors
+--// Colors — Huohuo (green) palette
+local BLACK      = Color3.fromRGB(8, 14, 12)
+local BACKGROUND = Color3.fromRGB(11, 19, 16)
+local DARK_PANEL = Color3.fromRGB(19, 32, 27)
+local GREEN        = Color3.fromRGB(111, 211, 162)
+local GREEN_BRIGHT = Color3.fromRGB(160, 238, 194)
+local GREEN_DARK   = Color3.fromRGB(30, 62, 50)
+local SELECTED   = Color3.fromRGB(25, 51, 42)
+local HOVER      = Color3.fromRGB(16, 28, 23)
+local WHITE      = Color3.fromRGB(241, 255, 249)
+local LIGHT      = Color3.fromRGB(213, 233, 224)
+local GRAY       = Color3.fromRGB(140, 165, 155)
+local BORDER     = Color3.fromRGB(40, 78, 65)
+
+--// Static accent for every module (single color theme)
 local ACCENTS = {
-    Combat           = Color3.fromRGB(200, 32, 40),
-    Visuals          = Color3.fromRGB(0, 200, 255),
-    Weapon           = Color3.fromRGB(255, 140, 20),
-    Movement         = Color3.fromRGB(60, 220, 110),
-    ["Skin Changer"] = Color3.fromRGB(175, 90, 255),
-    World            = Color3.fromRGB(240, 200, 60),
-    Viewmodel        = Color3.fromRGB(255, 90, 180),
-    Settings         = Color3.fromRGB(140, 160, 195),
+    Combat           = GREEN,
+    Visuals          = GREEN,
+    Weapon           = GREEN,
+    Movement         = GREEN,
+    ["Skin Changer"] = GREEN,
+    World            = GREEN,
+    Viewmodel        = GREEN,
+    Settings         = GREEN,
 }
-local DEFAULT_ACCENT = RED_BRIGHT
+local DEFAULT_ACCENT = GREEN
 
 local function LerpColor(a, b, t)
     return Color3.new(
@@ -53,7 +56,7 @@ local function Shade(color, amount)
 end
 
 --// Wave Config
-local WAVE_PEAK_TRANS   = 0.7
+local WAVE_PEAK_TRANS   = 0.82
 local WAVE_BAND_WIDTH   = 0.25
 local WAVE_DURATION     = 2.7
 local WAVE_PAUSE        = 1.1
@@ -270,7 +273,7 @@ function Gui:Init()
     Close.ZIndex = 7
     Close.Parent = Top
 
-    Close.MouseEnter:Connect(function() Close.BackgroundColor3 = Color3.fromRGB(215, 215, 215) end)
+    Close.MouseEnter:Connect(function() Close.BackgroundColor3 = Tint(GREEN, 0.6) end)
     Close.MouseLeave:Connect(function() Close.BackgroundColor3 = WHITE end)
     Close.MouseButton1Click:Connect(function() self:HideMenu() end)
 
@@ -308,6 +311,44 @@ function Gui:Init()
     Content.BackgroundTransparency = 1
     Content.ZIndex = 2
     Content.Parent = Main
+
+    --// Content background image (main module area only)
+    local ContentBg = Instance.new("ImageLabel")
+    ContentBg.Name = "ContentBackground"
+    ContentBg.Size = UDim2.new(1, -228, 1, -92)
+    ContentBg.Position = UDim2.fromOffset(200, 78)
+    ContentBg.BackgroundColor3 = BACKGROUND
+    ContentBg.BackgroundTransparency = 1
+    ContentBg.BorderSizePixel = 0
+    ContentBg.Image = BACKGROUND_IMAGE
+    ContentBg.ImageTransparency = 0.08
+    ContentBg.ScaleType = Enum.ScaleType.Crop
+    ContentBg.ZIndex = 2
+    ContentBg.Parent = Main
+
+    local ContentBgOverlay = Instance.new("Frame")
+    ContentBgOverlay.Name = "Overlay"
+    ContentBgOverlay.Size = UDim2.fromScale(1, 1)
+    ContentBgOverlay.BackgroundColor3 = BACKGROUND
+    ContentBgOverlay.BackgroundTransparency = 0.42
+    ContentBgOverlay.BorderSizePixel = 0
+    ContentBgOverlay.ZIndex = 2
+    ContentBgOverlay.Parent = ContentBg
+
+    local OverlayGrad = Instance.new("UIGradient")
+    OverlayGrad.Rotation = 90
+    OverlayGrad.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0.00, 0.05),
+        NumberSequenceKeypoint.new(0.45, 0.35),
+        NumberSequenceKeypoint.new(1.00, 0.55),
+    })
+    OverlayGrad.Parent = ContentBgOverlay
+
+    local ContentBgStroke = Instance.new("UIStroke")
+    ContentBgStroke.Color = BORDER
+    ContentBgStroke.Thickness = 1
+    ContentBgStroke.Transparency = 0.35
+    ContentBgStroke.Parent = ContentBg
 
     local ContentTitle = Instance.new("TextLabel")
     ContentTitle.Size = UDim2.new(1, 0, 0, 28)
@@ -367,6 +408,7 @@ function Gui:Init()
     self.Top = Top
     self.Sidebar = Sidebar
     self.Content = Content
+    self.ContentBg = ContentBg
     self.ContentTitle = ContentTitle
     self.ContentSubtitle = ContentSubtitle
     self.SavedPosition = SavedPosition
@@ -833,7 +875,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
     local Popup = Instance.new("Frame")
     Popup.Name = "DropdownPopup"
     Popup.Size = UDim2.fromOffset(150, math.min(#options * 26, 260))
-    Popup.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+    Popup.BackgroundColor3 = Color3.fromRGB(13, 22, 18)
     Popup.BorderSizePixel = 0
     Popup.Visible = false
     Popup.ZIndex = 100
@@ -871,7 +913,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
         local OptBtn = Instance.new("TextButton")
         OptBtn.Size = UDim2.new(1, 0, 0, 25)
         OptBtn.LayoutOrder = i
-        OptBtn.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+        OptBtn.BackgroundColor3 = Color3.fromRGB(13, 22, 18)
         OptBtn.BorderSizePixel = 0
         OptBtn.Text = "  " .. opt
         OptBtn.TextColor3 = opt == selected and accent or LIGHT
@@ -886,7 +928,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
             OptBtn.BackgroundColor3 = Shade(accent, 0.8)
         end)
         OptBtn.MouseLeave:Connect(function()
-            OptBtn.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
+            OptBtn.BackgroundColor3 = Color3.fromRGB(13, 22, 18)
         end)
         OptBtn.MouseButton1Click:Connect(function()
             local newValue = tostring(opt)
@@ -943,7 +985,7 @@ end
 --// ═══════════════════════════════════════════════════════════════
 function Gui:CreateColorPicker(label, defaultColor, callback, y)
     local accent = self.CurrentAccent or DEFAULT_ACCENT
-    local color = defaultColor or Color3.fromRGB(255, 0, 0)
+    local color = defaultColor or Color3.fromRGB(111, 211, 162)
 
     local PickerFrame = Instance.new("Frame")
     PickerFrame.Size = UDim2.new(1, 0, 0, 36)
@@ -982,7 +1024,7 @@ function Gui:CreateColorPicker(label, defaultColor, callback, y)
     local Popup = Instance.new("Frame")
     Popup.Name = "ColorPickerPopup"
     Popup.Size = UDim2.fromOffset(212, 214)
-    Popup.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+    Popup.BackgroundColor3 = Color3.fromRGB(11, 19, 16)
     Popup.BorderSizePixel = 0
     Popup.Visible = false
     Popup.ZIndex = 100
@@ -1090,7 +1132,7 @@ function Gui:CreateColorPicker(label, defaultColor, callback, y)
     local HexLabel = Instance.new("TextLabel")
     HexLabel.Size = UDim2.fromOffset(132, 24)
     HexLabel.Position = UDim2.fromOffset(72, 162)
-    HexLabel.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+    HexLabel.BackgroundColor3 = Color3.fromRGB(18, 30, 25)
     HexLabel.BorderSizePixel = 0
     HexLabel.Text = ""
     HexLabel.TextColor3 = WHITE
