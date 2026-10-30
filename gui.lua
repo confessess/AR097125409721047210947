@@ -203,18 +203,6 @@ local function KeyName(bind)
     return tostring(bind)
 end
 
-local function BindMatch(input, bind)
-    if not bind then return false end
-    if typeof(bind) == "EnumItem" then
-        if bind.EnumType == Enum.KeyCode then
-            return input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == bind
-        elseif bind.EnumType == Enum.UserInputType then
-            return input.UserInputType == bind
-        end
-    end
-    return false
-end
-
 --// State
 local ToggleKey = Enum.KeyCode.RightShift
 local WaitingForKey = false
@@ -268,8 +256,6 @@ StartMouseUnlockLoop()
 
 --// State storage
 Gui.ToggleStates = {}
-Gui.ModeStates = {}
-Gui.BindStates = {}
 Gui.ActiveHolds = {}
 
 local function ApplySelectedGradient(button, enabled)
@@ -288,26 +274,6 @@ end
 function Gui:SetToggleState(tabName, label, state)
     local toggleKey = tabName .. "_" .. label
     self.ToggleStates[toggleKey] = state
-end
-
-function Gui:GetToggleMode(tabName, label)
-    local toggleKey = tabName .. "_" .. label
-    return self.ModeStates[toggleKey] or "Toggle"
-end
-
-function Gui:SetToggleMode(tabName, label, mode)
-    local toggleKey = tabName .. "_" .. label
-    self.ModeStates[toggleKey] = mode
-end
-
-function Gui:GetToggleBind(tabName, label)
-    local toggleKey = tabName .. "_" .. label
-    return self.BindStates[toggleKey]
-end
-
-function Gui:SetToggleBind(tabName, label, key)
-    local toggleKey = tabName .. "_" .. label
-    self.BindStates[toggleKey] = key
 end
 
 --// Every registered momentary control gets released here
@@ -638,7 +604,7 @@ function Gui:Init()
     self.TabButtons = {}
 
     UserInputService.InputBegan:Connect(function(input, processed)
-        --// per-toggle keybind capture
+        --// keybind capture for keybind rows
         if BindCapture then
             local captured = nil
             if input.UserInputType == Enum.UserInputType.Keyboard then
@@ -930,27 +896,16 @@ function Gui:CreateSection(text, y)
 end
 
 --// ═══════════════════════════════════════════════════════════════
---//  TOGGLE
---//  The keybind row and the Toggle/Hold mode row are opt-in:
---    Gui:CreateToggle("Aimbot", false, cb, y, { Keybind = true })
--- ═══════════════════════════════════════════════════════════════
-local TOGGLE_MODES = { "Toggle", "Hold" }
-
-function Gui:CreateToggle(label, default, callback, y, options)
-    options = options or {}
+--//  TOGGLE — plain single row, nothing extra underneath
+--// ═══════════════════════════════════════════════════════════════
+function Gui:CreateToggle(label, default, callback, y)
     local accent = self.CurrentAccent or DEFAULT_ACCENT
     local toggleKey = self.CurrentTab .. "_" .. label
     local savedState = self.ToggleStates[toggleKey]
     local State = savedState ~= nil and savedState or default
-    local Mode = self.ModeStates[toggleKey] or options.Mode or "Toggle"
-    local hasBind = options.Keybind == true
-    local Bind = hasBind and (self.BindStates[toggleKey] or options.Key) or nil
-
-    local BLOCK_H = 36
-    if hasBind then BLOCK_H = BLOCK_H + 34 + 34 end
 
     local ToggleFrame = Instance.new("Frame")
-    ToggleFrame.Size = UDim2.new(1, 0, 0, BLOCK_H)
+    ToggleFrame.Size = UDim2.new(1, 0, 0, 36)
     ToggleFrame.Position = UDim2.fromOffset(0, y)
     ToggleFrame.BackgroundTransparency = 1
     ToggleFrame.ZIndex = 3
@@ -972,7 +927,7 @@ function Gui:CreateToggle(label, default, callback, y, options)
     ToggleBtn.Position = UDim2.new(1, -70, 0, 5)
     ToggleBtn.BackgroundColor3 = State and accent or DARK_PANEL
     ToggleBtn.BorderSizePixel = 0
-    ToggleBtn.Text = State and "ON" or (Mode == "Hold" and "HOLD" or "OFF")
+    ToggleBtn.Text = State and "ON" or "OFF"
     ToggleBtn.TextColor3 = State and BLACK or GRAY
     ToggleBtn.TextSize = 10
     ToggleBtn.Font = Enum.Font.GothamBold
@@ -985,279 +940,231 @@ function Gui:CreateToggle(label, default, callback, y, options)
     ToggleStroke.Thickness = 1
     ToggleStroke.Parent = ToggleBtn
 
-    local held = false
-
     local function Draw()
-        local on = State and true or false
-        ToggleBtn.BackgroundColor3 = on and accent or DARK_PANEL
-        ToggleBtn.TextColor3 = on and BLACK or GRAY
-        ToggleBtn.Text = on and "ON" or (Mode == "Hold" and "HOLD" or "OFF")
-        ToggleStroke.Color = on and accent or Shade(accent, 0.6)
-    end
-
-    local function Press()
-        if Mode ~= "Hold" or held then return end
-        held = true
-        State = true
-        self.ToggleStates[toggleKey] = true
-        Draw()
-        if callback then task.spawn(function() pcall(callback, true) end) end
-    end
-
-    local function Release()
-        if Mode ~= "Hold" or not held then return end
-        held = false
-        State = false
-        self.ToggleStates[toggleKey] = false
-        Draw()
-        if callback then task.spawn(function() pcall(callback, false) end) end
-    end
-
-    local function Flip()
-        State = not State
-        self.ToggleStates[toggleKey] = State
-        Draw()
-        if callback then task.spawn(function() pcall(callback, State) end) end
-    end
-
-    self.ActiveHolds[ToggleBtn] = { Release = Release }
-
-    --// ── optional keybind row ──
-    local BindChip
-    if hasBind then
-        local BindCaption = Instance.new("TextLabel")
-        BindCaption.Size = UDim2.new(1, -110, 0, 22)
-        BindCaption.Position = UDim2.fromOffset(0, 40)
-        BindCaption.BackgroundTransparency = 1
-        BindCaption.Text = "Keybind"
-        BindCaption.TextColor3 = Shade(Tint(accent, 0.5), 0.35)
-        BindCaption.TextSize = 10
-        BindCaption.Font = Enum.Font.Gotham
-        BindCaption.TextXAlignment = Enum.TextXAlignment.Left
-        BindCaption.ZIndex = 4
-        BindCaption.Parent = ToggleFrame
-
-        BindChip = Instance.new("TextButton")
-        BindChip.Name = "BindChip"
-        BindChip.Size = UDim2.fromOffset(84, 22)
-        BindChip.Position = UDim2.new(1, -84, 0, 40)
-        BindChip.BackgroundColor3 = DARK_PANEL
-        BindChip.BorderSizePixel = 0
-        BindChip.Text = Bind and KeyName(Bind) or "None"
-        BindChip.TextColor3 = Bind and Tint(accent, 0.3) or GRAY
-        BindChip.TextSize = 10
-        BindChip.Font = Enum.Font.GothamBold
-        BindChip.AutoButtonColor = false
-        BindChip.ZIndex = 4
-        BindChip.Parent = ToggleFrame
-
-        local BindStroke = Instance.new("UIStroke")
-        BindStroke.Color = Shade(accent, 0.6)
-        BindStroke.Thickness = 1
-        BindStroke.Parent = BindChip
-
-        BindChip.MouseEnter:Connect(function()
-            BindChip.BackgroundColor3 = Shade(accent, 0.82)
-            BindStroke.Color = accent
-        end)
-        BindChip.MouseLeave:Connect(function()
-            BindChip.BackgroundColor3 = DARK_PANEL
-            BindStroke.Color = Shade(accent, 0.6)
-        end)
-        BindChip.MouseButton1Click:Connect(function()
-            if BindCapture then return end
-            BindChip.Text = "Press a key..."
-            BindChip.TextColor3 = accent
-            BindCapture = {
-                Callback = function(captured)
-                    Bind = captured
-                    self.BindStates[toggleKey] = captured
-                    BindChip.Text = KeyName(captured)
-                    BindChip.TextColor3 = Tint(accent, 0.3)
-                    if options.OnKeyChanged then pcall(options.OnKeyChanged, captured) end
-                end,
-            }
-        end)
-
-        --// the bound key drives this toggle, honouring the chosen mode
-        UserInputService.InputBegan:Connect(function(input, processed)
-            if processed or not Bind then return end
-            if not BindChip.Parent then return end
-            if not BindMatch(input, Bind) then return end
-            if Mode == "Hold" then Press() else Flip() end
-        end)
-        UserInputService.InputEnded:Connect(function(input)
-            if not Bind or not BindChip.Parent then return end
-            if not BindMatch(input, Bind) then return end
-            Release()
-        end)
-    end
-
-    --// ── optional mode row (only with a keybind) ──
-    local ModePopup, ModeChip, ModeStroke
-    if hasBind then
-        local ModeCaption = Instance.new("TextLabel")
-        ModeCaption.Size = UDim2.new(1, -110, 0, 22)
-        ModeCaption.Position = UDim2.fromOffset(0, 74)
-        ModeCaption.BackgroundTransparency = 1
-        ModeCaption.Text = "Activation mode"
-        ModeCaption.TextColor3 = Shade(Tint(accent, 0.5), 0.35)
-        ModeCaption.TextSize = 10
-        ModeCaption.Font = Enum.Font.Gotham
-        ModeCaption.TextXAlignment = Enum.TextXAlignment.Left
-        ModeCaption.ZIndex = 4
-        ModeCaption.Parent = ToggleFrame
-
-        ModeChip = Instance.new("TextButton")
-        ModeChip.Name = "ModeChip"
-        ModeChip.Size = UDim2.fromOffset(84, 22)
-        ModeChip.Position = UDim2.new(1, -84, 0, 74)
-        ModeChip.BackgroundColor3 = DARK_PANEL
-        ModeChip.BorderSizePixel = 0
-        ModeChip.Text = Mode .. "  ▾"
-        ModeChip.TextColor3 = Tint(accent, 0.3)
-        ModeChip.TextSize = 10
-        ModeChip.Font = Enum.Font.GothamBold
-        ModeChip.AutoButtonColor = false
-        ModeChip.ZIndex = 4
-        ModeChip.Parent = ToggleFrame
-
-        ModeStroke = Instance.new("UIStroke")
-        ModeStroke.Color = Shade(accent, 0.6)
-        ModeStroke.Thickness = 1
-        ModeStroke.Parent = ModeChip
-
-        ModePopup = Instance.new("Frame")
-        ModePopup.Name = "ModePopup"
-        ModePopup.Size = UDim2.fromOffset(84, #TOGGLE_MODES * 24 + 4)
-        ModePopup.BackgroundColor3 = Color3.fromRGB(13, 22, 18)
-        ModePopup.BorderSizePixel = 0
-        ModePopup.Visible = false
-        ModePopup.ZIndex = 100
-        ModePopup.Parent = self.ScreenGui
-
-        local ModePopupStroke = Instance.new("UIStroke")
-        ModePopupStroke.Color = accent
-        ModePopupStroke.Thickness = 1.5
-        ModePopupStroke.Parent = ModePopup
-
-        local function SetMode(newMode)
-            if Mode == newMode then return end
-            Release()
-            Mode = newMode
-            self.ModeStates[toggleKey] = newMode
-            ModeChip.Text = Mode .. "  ▾"
-            if Mode == "Hold" then
-                State = false
-                self.ToggleStates[toggleKey] = false
-                if callback then task.spawn(function() pcall(callback, false) end) end
-            end
-            Draw()
-            for _, child in ipairs(ModePopup:GetChildren()) do
-                if child:IsA("TextButton") then
-                    child.TextColor3 = (child:GetAttribute("ModeValue") == Mode) and accent or LIGHT
-                end
-            end
-        end
-
-        for i, modeName in ipairs(TOGGLE_MODES) do
-            local OptBtn = Instance.new("TextButton")
-            OptBtn.Size = UDim2.new(1, -4, 0, 22)
-            OptBtn.Position = UDim2.fromOffset(2, 2 + (i - 1) * 24)
-            OptBtn.BackgroundColor3 = Color3.fromRGB(13, 22, 18)
-            OptBtn.BorderSizePixel = 0
-            OptBtn.Text = "  " .. modeName
-            OptBtn.TextColor3 = modeName == Mode and accent or LIGHT
-            OptBtn.TextSize = 10
-            OptBtn.Font = Enum.Font.GothamBold
-            OptBtn.TextXAlignment = Enum.TextXAlignment.Left
-            OptBtn.AutoButtonColor = false
-            OptBtn.ZIndex = 101
-            OptBtn.Parent = ModePopup
-            OptBtn:SetAttribute("ModeValue", modeName)
-
-            OptBtn.MouseEnter:Connect(function()
-                OptBtn.BackgroundColor3 = Shade(accent, 0.8)
-            end)
-            OptBtn.MouseLeave:Connect(function()
-                OptBtn.BackgroundColor3 = Color3.fromRGB(13, 22, 18)
-            end)
-            OptBtn.MouseButton1Click:Connect(function()
-                SetMode(modeName)
-                ModePopup.Visible = false
-            end)
-        end
-
-        ModeChip.MouseEnter:Connect(function()
-            ModeChip.BackgroundColor3 = Shade(accent, 0.82)
-            ModeStroke.Color = accent
-        end)
-        ModeChip.MouseLeave:Connect(function()
-            ModeChip.BackgroundColor3 = DARK_PANEL
-            ModeStroke.Color = Shade(accent, 0.6)
-        end)
-        ModeChip.MouseButton1Click:Connect(function()
-            if ModePopup.Visible then
-                ModePopup.Visible = false
-            else
-                local absPos = ModeChip.AbsolutePosition
-                local absSize = ModeChip.AbsoluteSize
-                ModePopup.Position = UDim2.fromOffset(absPos.X, absPos.Y + absSize.Y + 2)
-                ModePopup.Visible = true
-            end
-        end)
-
-        UserInputService.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 and ModePopup.Visible then
-                local mousePos = Vector2.new(input.Position.X, input.Position.Y)
-                local pPos = ModePopup.AbsolutePosition
-                local pSize = ModePopup.AbsoluteSize
-                local cPos = ModeChip.AbsolutePosition
-                local cSize = ModeChip.AbsoluteSize
-
-                local inPopup = mousePos.X >= pPos.X and mousePos.X <= pPos.X + pSize.X and
-                                mousePos.Y >= pPos.Y and mousePos.Y <= pPos.Y + pSize.Y
-                local inChip = mousePos.X >= cPos.X and mousePos.X <= cPos.X + cSize.X and
-                               mousePos.Y >= cPos.Y and mousePos.Y <= cPos.Y + cSize.Y
-
-                if not inPopup and not inChip then
-                    ModePopup.Visible = false
-                end
-            end
-        end)
+        ToggleBtn.BackgroundColor3 = State and accent or DARK_PANEL
+        ToggleBtn.TextColor3 = State and BLACK or GRAY
+        ToggleBtn.Text = State and "ON" or "OFF"
+        ToggleStroke.Color = State and accent or Shade(accent, 0.6)
     end
 
     ToggleBtn.MouseEnter:Connect(function()
-        if Mode == "Hold" and held then return end
         ToggleBtn.BackgroundColor3 = State and Tint(accent, 0.35) or Shade(accent, 0.82)
     end)
     ToggleBtn.MouseLeave:Connect(function()
-        if Mode == "Hold" and held then return end
         ToggleBtn.BackgroundColor3 = State and accent or DARK_PANEL
     end)
-    ToggleBtn.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch then
-            Press()
-        end
-    end)
-    ToggleBtn.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-            or input.UserInputType == Enum.UserInputType.Touch then
-            Release()
-        end
-    end)
     ToggleBtn.MouseButton1Click:Connect(function()
-        if Mode ~= "Toggle" then return end
-        Flip()
+        State = not State
+        self.ToggleStates[toggleKey] = State
+        Draw()
+        if callback then callback(State) end
     end)
 
-    ToggleBtn.Destroying:Connect(function()
-        self.ActiveHolds[ToggleBtn] = nil
-        if ModePopup then ModePopup:Destroy() end
+    return y + 42
+end
+
+--// ═══════════════════════════════════════════════════════════════
+--//  KEYBIND ROW — a bind button with a Toggle/Hold chooser under it
+--//  options = { Key = Enum, Mode = "Toggle"|"Hold",
+--//              OnKeyChanged = fn(key), OnModeChanged = fn(mode) }
+-- ═══════════════════════════════════════════════════════════════
+local ACTIVATION_MODES = { "Toggle", "Hold" }
+
+function Gui:CreateKeybindRow(label, options, y)
+    options = options or {}
+    local accent = self.CurrentAccent or DEFAULT_ACCENT
+    local key = options.Key
+    local mode = options.Mode or "Hold"
+
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(1, 0, 0, 74)
+    Frame.Position = UDim2.fromOffset(0, y)
+    Frame.BackgroundTransparency = 1
+    Frame.ZIndex = 3
+    Frame.Parent = self.Content
+
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, -140, 0, 36)
+    Label.BackgroundTransparency = 1
+    Label.Text = label
+    Label.TextColor3 = Tint(accent, 0.72)
+    Label.TextSize = 13
+    Label.Font = Enum.Font.GothamMedium
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.ZIndex = 4
+    Label.Parent = Frame
+
+    local BindBtn = Instance.new("TextButton")
+    BindBtn.Name = "BindButton"
+    BindBtn.Size = UDim2.fromOffset(120, 28)
+    BindBtn.Position = UDim2.new(1, -140, 0, 4)
+    BindBtn.BackgroundColor3 = DARK_PANEL
+    BindBtn.BorderSizePixel = 0
+    BindBtn.Text = "Bind: " .. KeyName(key)
+    BindBtn.TextColor3 = key and Tint(accent, 0.4) or GRAY
+    BindBtn.TextSize = 11
+    BindBtn.Font = Enum.Font.GothamMedium
+    BindBtn.AutoButtonColor = false
+    BindBtn.ZIndex = 4
+    BindBtn.Parent = Frame
+
+    local BindStroke = Instance.new("UIStroke")
+    BindStroke.Color = Shade(accent, 0.6)
+    BindStroke.Thickness = 1
+    BindStroke.Parent = BindBtn
+
+    --// mode row
+    local ModeCaption = Instance.new("TextLabel")
+    ModeCaption.Size = UDim2.new(1, -140, 0, 22)
+    ModeCaption.Position = UDim2.fromOffset(0, 40)
+    ModeCaption.BackgroundTransparency = 1
+    ModeCaption.Text = "Activation mode"
+    ModeCaption.TextColor3 = Shade(Tint(accent, 0.5), 0.35)
+    ModeCaption.TextSize = 10
+    ModeCaption.Font = Enum.Font.Gotham
+    ModeCaption.TextXAlignment = Enum.TextXAlignment.Left
+    ModeCaption.ZIndex = 4
+    ModeCaption.Parent = Frame
+
+    local ModeChip = Instance.new("TextButton")
+    ModeChip.Name = "ModeChip"
+    ModeChip.Size = UDim2.fromOffset(120, 22)
+    ModeChip.Position = UDim2.new(1, -140, 0, 40)
+    ModeChip.BackgroundColor3 = DARK_PANEL
+    ModeChip.BorderSizePixel = 0
+    ModeChip.Text = mode .. "  ▾"
+    ModeChip.TextColor3 = Tint(accent, 0.3)
+    ModeChip.TextSize = 10
+    ModeChip.Font = Enum.Font.GothamBold
+    ModeChip.AutoButtonColor = false
+    ModeChip.ZIndex = 4
+    ModeChip.Parent = Frame
+
+    local ModeStroke = Instance.new("UIStroke")
+    ModeStroke.Color = Shade(accent, 0.6)
+    ModeStroke.Thickness = 1
+    ModeStroke.Parent = ModeChip
+
+    local ModePopup = Instance.new("Frame")
+    ModePopup.Name = "ModePopup"
+    ModePopup.Size = UDim2.fromOffset(120, #ACTIVATION_MODES * 24 + 4)
+    ModePopup.BackgroundColor3 = Color3.fromRGB(13, 22, 18)
+    ModePopup.BorderSizePixel = 0
+    ModePopup.Visible = false
+    ModePopup.ZIndex = 100
+    ModePopup.Parent = self.ScreenGui
+
+    local ModePopupStroke = Instance.new("UIStroke")
+    ModePopupStroke.Color = accent
+    ModePopupStroke.Thickness = 1.5
+    ModePopupStroke.Parent = ModePopup
+
+    local function SetMode(newMode)
+        if mode == newMode then return end
+        mode = newMode
+        ModeChip.Text = mode .. "  ▾"
+        if options.OnModeChanged then pcall(options.OnModeChanged, mode) end
+        for _, child in ipairs(ModePopup:GetChildren()) do
+            if child:IsA("TextButton") then
+                child.TextColor3 = (child:GetAttribute("ModeValue") == mode) and accent or LIGHT
+            end
+        end
+    end
+
+    for i, modeName in ipairs(ACTIVATION_MODES) do
+        local OptBtn = Instance.new("TextButton")
+        OptBtn.Size = UDim2.new(1, -4, 0, 22)
+        OptBtn.Position = UDim2.fromOffset(2, 2 + (i - 1) * 24)
+        OptBtn.BackgroundColor3 = Color3.fromRGB(13, 22, 18)
+        OptBtn.BorderSizePixel = 0
+        OptBtn.Text = "  " .. modeName
+        OptBtn.TextColor3 = modeName == mode and accent or LIGHT
+        OptBtn.TextSize = 10
+        OptBtn.Font = Enum.Font.GothamBold
+        OptBtn.TextXAlignment = Enum.TextXAlignment.Left
+        OptBtn.AutoButtonColor = false
+        OptBtn.ZIndex = 101
+        OptBtn.Parent = ModePopup
+        OptBtn:SetAttribute("ModeValue", modeName)
+
+        OptBtn.MouseEnter:Connect(function()
+            OptBtn.BackgroundColor3 = Shade(accent, 0.8)
+        end)
+        OptBtn.MouseLeave:Connect(function()
+            OptBtn.BackgroundColor3 = Color3.fromRGB(13, 22, 18)
+        end)
+        OptBtn.MouseButton1Click:Connect(function()
+            SetMode(modeName)
+            ModePopup.Visible = false
+        end)
+    end
+
+    ModeChip.MouseEnter:Connect(function()
+        ModeChip.BackgroundColor3 = Shade(accent, 0.82)
+        ModeStroke.Color = accent
+    end)
+    ModeChip.MouseLeave:Connect(function()
+        ModeChip.BackgroundColor3 = DARK_PANEL
+        ModeStroke.Color = Shade(accent, 0.6)
+    end)
+    ModeChip.MouseButton1Click:Connect(function()
+        if ModePopup.Visible then
+            ModePopup.Visible = false
+        else
+            local absPos = ModeChip.AbsolutePosition
+            local absSize = ModeChip.AbsoluteSize
+            ModePopup.Position = UDim2.fromOffset(absPos.X, absPos.Y + absSize.Y + 2)
+            ModePopup.Visible = true
+        end
     end)
 
-    return y + BLOCK_H + 2
+    UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 and ModePopup.Visible then
+            local mousePos = Vector2.new(input.Position.X, input.Position.Y)
+            local pPos = ModePopup.AbsolutePosition
+            local pSize = ModePopup.AbsoluteSize
+            local cPos = ModeChip.AbsolutePosition
+            local cSize = ModeChip.AbsoluteSize
+
+            local inPopup = mousePos.X >= pPos.X and mousePos.X <= pPos.X + pSize.X and
+                            mousePos.Y >= pPos.Y and mousePos.Y <= pPos.Y + pSize.Y
+            local inChip = mousePos.X >= cPos.X and mousePos.X <= cPos.X + cSize.X and
+                           mousePos.Y >= cPos.Y and mousePos.Y <= cPos.Y + cSize.Y
+
+            if not inPopup and not inChip then
+                ModePopup.Visible = false
+            end
+        end
+    end)
+
+    --// bind capture
+    BindBtn.MouseEnter:Connect(function()
+        BindBtn.BackgroundColor3 = Shade(accent, 0.82)
+        BindStroke.Color = accent
+    end)
+    BindBtn.MouseLeave:Connect(function()
+        BindBtn.BackgroundColor3 = DARK_PANEL
+        BindStroke.Color = Shade(accent, 0.6)
+    end)
+    BindBtn.MouseButton1Click:Connect(function()
+        if BindCapture then return end
+        BindBtn.Text = "Press a key..."
+        BindBtn.TextColor3 = accent
+        BindCapture = {
+            Callback = function(captured)
+                key = captured
+                BindBtn.Text = "Bind: " .. KeyName(captured)
+                BindBtn.TextColor3 = Tint(accent, 0.4)
+                if options.OnKeyChanged then pcall(options.OnKeyChanged, captured) end
+            end,
+        }
+    end)
+
+    Frame.Destroying:Connect(function()
+        ModePopup:Destroy()
+    end)
+
+    return y + 76
 end
 
 function Gui:CreateSlider(label, min, max, default, callback, y)
