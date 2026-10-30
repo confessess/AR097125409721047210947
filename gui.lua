@@ -462,7 +462,7 @@ function Gui:Init()
     ContentBg.BackgroundTransparency = 1
     ContentBg.BorderSizePixel = 0
     ContentBg.Image = ""
-    ContentBg.ImageTransparency = 0.3
+    ContentBg.ImageTransparency = 0.2
     ContentBg.ScaleType = Enum.ScaleType.Crop
     ContentBg.Visible = false
     ContentBg.ZIndex = 1
