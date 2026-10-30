@@ -30,7 +30,6 @@ ESP.Config = {
     ChamsTransparency = 0,
     ChamsDepth = "Always on top",
     TintMaterial = "Neon",
-    Debug = true,
 }
 
 local METERS_PER_STUD = 0.28
@@ -38,19 +37,6 @@ local METERS_PER_STUD = 0.28
 local Visuals = {}
 local TracerFolder = nil
 local ESPGui = nil
-
-local Debug = { nextAt = 0, errors = {}, dumped = {} }
-
-local function dbg(...)
-    if not ESP.Config.Debug then return end
-    print("[ENI ESP]", ...)
-end
-
-local function dbgError(key, err)
-    if Debug.errors[key] then return end
-    Debug.errors[key] = true
-    warn("[ENI ESP] error in " .. key .. ": " .. tostring(err))
-end
 
 --// ── helpers ────────────────────────────────────────────────────
 local function colorHex(c)
@@ -563,8 +549,6 @@ local function step()
     local isFFA = ffa and ffa.Value
 
     local hex = colorHex(cfg.Color)
-    local readyCount = 0
-    local report = {}
 
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
@@ -602,11 +586,7 @@ local function step()
                 reason = string.format("too far (%.0f)", studs)
             end
 
-            local ready = reason == nil
-            if ready then readyCount = readyCount + 1 end
-            report[#report + 1] = string.format("%s: %s", player.Name, reason or "READY")
-
-            if ready then
+            if reason == nil then
                 local rect, size = nil, nil
                 if cfg.Boxes or cfg.Fill then
                     local okRect, r, s = pcall(characterScreenRect, character, cam)
@@ -635,11 +615,8 @@ local function step()
                     end
                 end
 
-                local okHighlight, highlightErr = pcall(syncHighlight, v, character, cfg.Chams)
-                if not okHighlight then dbgError("syncHighlight", highlightErr) end
-
-                local okTint, tintErr = pcall(syncTint, v, character, cfg.Tint)
-                if not okTint then dbgError("syncTint", tintErr) end
+                pcall(syncHighlight, v, character, cfg.Chams)
+                pcall(syncTint, v, character, cfg.Tint)
 
                 v.billboard.Adornee = head
 
@@ -660,14 +637,6 @@ local function step()
                 end
                 if cfg.Weapon then
                     local weapon = readWeapon(player, character)
-                    if not weapon and cfg.Debug and not Debug.dumped[player] then
-                        Debug.dumped[player] = true
-                        local names = {}
-                        for _, c in ipairs(character:GetChildren()) do
-                            names[#names + 1] = c.Name .. "(" .. c.ClassName .. ")"
-                        end
-                        dbg("children of " .. player.Name .. ": " .. table.concat(names, ", "))
-                    end
                     lines[#lines + 1] = '<font color="#E7EDF2">'
                         .. escapeRichText(weapon or "None") .. '</font>'
                 end
@@ -707,22 +676,10 @@ local function step()
             end
         end
     end
-
-    local now = os.clock()
-    if cfg.Debug and now >= Debug.nextAt then
-        Debug.nextAt = now + 2
-        dbg(string.format("players=%d ready=%d drawing=%s ffa=%s",
-            #Players:GetPlayers() - 1, readyCount, tostring(Drawing ~= nil), tostring(isFFA)))
-        for i = 1, math.min(#report, 8) do dbg("  " .. report[i]) end
-        local self = LocalPlayer:FindFirstChild("NRPBS")
-        local h = self and self:FindFirstChild("Health")
-        dbg("  self NRPBS.Health = " .. tostring(h and h.Value))
-    end
 end
 
 RunService.RenderStepped:Connect(function()
-    local ok, err = pcall(step)
-    if not ok then dbgError("step", err) end
+    pcall(step)
 end)
 
 Players.PlayerRemoving:Connect(destroyVisual)
@@ -792,7 +749,6 @@ function ESP:Init(Gui)
             y = g:CreateSlider("Render Distance", 10, 2500, ESP.Config.RenderDistance, function(v)
                 ESP.Config.RenderDistance = v
             end, y)
-            y = g:CreateToggle("Debug", ESP.Config.Debug, function(s) ESP.Config.Debug = s end, y)
 
             y = g:CreateSection("Chams", y + 10)
             y = g:CreateSlider("Cham Transparency", 0, 90, math.floor(ESP.Config.ChamsTransparency * 100), function(v)
