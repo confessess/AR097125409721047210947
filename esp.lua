@@ -17,6 +17,7 @@ ESP.Config = {
     Enabled = false,
     Boxes = false,
     Chams = false,
+    Fill = false,
     Names = false,
     Health = false,
     Distance = false,
@@ -26,7 +27,7 @@ ESP.Config = {
     RenderDistance = 1000,
     Color = Color3.fromRGB(255, 0, 45),
     ChamsTransparency = 0,
-    ChamsMaterial = "ForceField",
+    ChamsMaterial = "Neon",
     Debug = true,
 }
 
@@ -77,34 +78,76 @@ local function healthColor(ratio)
     return "#55DDFF"
 end
 
---// health lives on custom values, never trust a pinned Humanoid alone
-local function readHealth(player, character, humanoid)
-    local lowest = humanoid.Health
-    local max = math.max(1, humanoid.MaxHealth)
+--// ── health ─────────────────────────────────────────────────────
+--// The Humanoid is pinned at 100 in MM2, so real health has to come from the
+--// replicated value objects. First container that has a usable value wins;
+--// the humanoid is only a fallback.
+local function healthContainers(player, character)
+    local list = {}
+    local function add(container, deep)
+        if container then list[#list + 1] = { container = container, deep = deep } end
+    end
+    add(player:FindFirstChild("NRPBS"), true)
+    add(character:FindFirstChild("NRPBS"), true)
+    add(character:FindFirstChild("Status"), true)
+    add(character:FindFirstChild("Health"), false)
+    add(character, false)
+    add(player:FindFirstChild("ScoreFolder"), true)
+    add(player, false)
+    return list
+end
 
-    local function consider(container, maxNames)
-        if not container then return end
-        local v = container:FindFirstChild("Health")
-        if v and v:IsA("ValueBase") and typeof(v.Value) == "number" then
-            if v.Value < lowest then lowest = v.Value end
-        end
-        for _, name in ipairs(maxNames or {}) do
-            local m = container:FindFirstChild(name)
-            if m and m:IsA("ValueBase") and typeof(m.Value) == "number" and m.Value > 0 then
-                max = m.Value
-                break
+local function findNumberValue(container, names, deep)
+    local function match(holder)
+        for _, name in ipairs(names) do
+            local v = holder:FindFirstChild(name)
+            if v and v:IsA("ValueBase") and typeof(v.Value) == "number" then
+                return v
             end
         end
+        return nil
     end
 
-    consider(player:FindFirstChild("NRPBS"), { "MaxHealth", "OMaxHealth" })
-    consider(character:FindFirstChild("NRPBS"), { "MaxHealth", "OMaxHealth" })
-    consider(character:FindFirstChild("Status"))
-    consider(character)
-    consider(player:FindFirstChild("ScoreFolder"))
-    consider(player)
+    local direct = match(container)
+    if direct then return direct end
+    if not deep then return nil end
 
-    return math.clamp(lowest, 0, max), max
+    for _, child in ipairs(container:GetChildren()) do
+        if child:IsA("Folder") or child:IsA("Model") then
+            local nested = match(child)
+            if nested then return nested end
+        end
+    end
+    return nil
+end
+
+local function readHealth(player, character, humanoid)
+    local containers = healthContainers(player, character)
+
+    local maxValue, curValue
+    for _, entry in ipairs(containers) do
+        maxValue = findNumberValue(entry.container, { "MaxHealth", "OMaxHealth" }, entry.deep)
+        if maxValue then break end
+    end
+    for _, entry in ipairs(containers) do
+        curValue = findNumberValue(entry.container, { "Health", "OMaxHealth" }, entry.deep)
+        if curValue then break end
+    end
+
+    local max = (maxValue and maxValue.Value)
+        or (humanoid and humanoid.MaxHealth)
+        or (character:GetAttribute("MaxHealth"))
+        or 100
+    max = math.max(1, max)
+
+    local current = (curValue and curValue.Value)
+        or character:GetAttribute("Health")
+        or (humanoid and humanoid.Health)
+        or max
+
+    if current > max then max = current end
+
+    return math.clamp(current, 0, max), max
 end
 
 --// remote weapons are not always a Tool child; walk every plausible holder
@@ -336,52 +379,118 @@ local function clearChams(v)
             end)
         end
     end
+    for decal, transparency in pairs(v.chamDecals or {}) do
+        if decal and decal.Parent then
+            pcall(function() decal.Transparency = transparency end)
+        end
+    end
+    for appearance, data in pairs(v.chamAppearances or {}) do
+        if appearance and appearance.Parent then
+            pcall(function()
+                appearance.Color = data.Color
+                appearance.Transparency = data.Transparency
+            end)
+        end
+    end
     v.chamData = {}
+    v.chamDecals = {}
+    v.chamAppearances = {}
     v.chamCharacter = nil
 end
 
-local function collectParts(character)
-    local parts = {}
+local function collectChamTargets(character)
+    local parts, decals, appearances = {}, {}, {}
     for _, obj in ipairs(character:GetDescendants()) do
-        if obj:IsA("BasePart") then parts[#parts + 1] = obj end
+        if obj:IsA("BasePart") then
+            parts[#parts + 1] = obj
+        elseif obj:IsA("Decal") or obj:IsA("Texture") then
+            decals[#decals + 1] = obj
+        elseif obj:IsA("SurfaceAppearance") then
+            appearances[#appearances + 1] = obj
+        end
     end
-    return parts
+    return parts, decals, appearances
+end
+
+local function applyChamMaterial(part, mat)
+    part.Material = mat
+    part.Color = ESP.Config.Color
+    part.Transparency = ESP.Config.ChamsTransparency
+    --// LTM composes on top of Transparency, so it must be cleared or the
+    --// part stays see-through regardless of the slider
+    part.LocalTransparencyModifier = 0
 end
 
 local function syncChams(v, character, enabled)
+    v.chamDecals = v.chamDecals or {}
+    v.chamAppearances = v.chamAppearances or {}
+
     if v.chamCharacter ~= character then
         clearChams(v)
         if enabled and character then
             v.chamCharacter = character
-            local mat = Enum.Material[ESP.Config.ChamsMaterial] or Enum.Material.ForceField
-            for _, part in ipairs(collectParts(character)) do
+            local mat = Enum.Material[ESP.Config.ChamsMaterial] or Enum.Material.Neon
+            local parts, decals, appearances = collectChamTargets(character)
+
+            for _, part in ipairs(parts) do
                 v.chamData[part] = {
                     Material = part.Material,
                     Color = part.Color,
                     Transparency = part.Transparency,
                     LocalTransparencyModifier = part.LocalTransparencyModifier,
                 }
-                part.Material = mat
-                part.Color = ESP.Config.Color
-                part.Transparency = ESP.Config.ChamsTransparency
-                part.LocalTransparencyModifier = ESP.Config.ChamsTransparency
+                applyChamMaterial(part, mat)
+            end
+
+            --// SurfaceAppearance overrides Material/Color, so tint it too
+            for _, appearance in ipairs(appearances) do
+                v.chamAppearances[appearance] = {
+                    Color = appearance.Color,
+                    Transparency = appearance.Transparency,
+                }
+                pcall(function()
+                    appearance.Color = ESP.Config.Color
+                    appearance.Transparency = 0
+                end)
+            end
+
+            --// faces / textures sit on top of the body, hide them for clean chams
+            for _, decal in ipairs(decals) do
+                v.chamDecals[decal] = decal.Transparency
+                pcall(function() decal.Transparency = 1 end)
             end
         end
         return
     end
 
     if not enabled then
-        if next(v.chamData) then clearChams(v) end
+        if next(v.chamData) or next(v.chamDecals) or next(v.chamAppearances) then
+            clearChams(v)
+        end
         return
     end
 
-    local mat = Enum.Material[ESP.Config.ChamsMaterial] or Enum.Material.ForceField
+    local mat = Enum.Material[ESP.Config.ChamsMaterial] or Enum.Material.Neon
     for part in pairs(v.chamData) do
         if part.Parent then
-            if part.Material ~= mat then part.Material = mat end
-            if part.Color ~= ESP.Config.Color then part.Color = ESP.Config.Color end
+            if part.Material ~= mat
+                or part.Color ~= ESP.Config.Color
+                or part.Transparency ~= ESP.Config.ChamsTransparency
+                or part.LocalTransparencyModifier ~= 0 then
+                applyChamMaterial(part, mat)
+            end
         else
             v.chamData[part] = nil
+        end
+    end
+    for appearance in pairs(v.chamAppearances) do
+        if not appearance.Parent then
+            v.chamAppearances[appearance] = nil
+        end
+    end
+    for decal in pairs(v.chamDecals) do
+        if not decal.Parent then
+            v.chamDecals[decal] = nil
         end
     end
 end
@@ -400,6 +509,7 @@ local function step()
             if v.fill then v.fill.Visible = false end
             if v.billboard then v.billboard.Enabled = false; v.billboard.Adornee = nil end
             if v.tracer then v.tracer.Enabled = false end
+            if next(v.chamData) then clearChams(v) end
         end
         return
     end
@@ -466,7 +576,7 @@ local function step()
 
             if ready then
                 local rect, size = nil, nil
-                if cfg.Boxes or cfg.Chams then
+                if cfg.Boxes or cfg.Fill then
                     local okRect, r, s = pcall(characterScreenRect, character, cam)
                     if okRect then rect, size = r, s end
                 end
@@ -482,7 +592,7 @@ local function step()
                     end
                 end
                 if v.fill then
-                    if rect and cfg.Chams then
+                    if rect and cfg.Fill then
                         v.fill.Position = rect
                         v.fill.Size = size
                         v.fill.Color = cfg.Color
@@ -609,6 +719,11 @@ function ESP.SetColor(c)
     end
 end
 
+local CHAM_MATERIALS = {
+    "Neon", "ForceField", "Glass", "SmoothPlastic", "Metal", "Plastic",
+    "Marble", "Granite", "Foil", "Ice", "DiamondPlate", "CorrodedMetal",
+}
+
 function ESP:Init(Gui)
     self.Gui = Gui
     Gui:SetTabRebuild("Visuals", function(g)
@@ -616,29 +731,44 @@ function ESP:Init(Gui)
         local originalContent = g.Content
         g.Content = scroll
 
-        local y = g:CreateSection("ESP", 0)
-        y = g:CreateToggle("Enabled", ESP.Config.Enabled, function(s)
-            ESP.Config.Enabled = s
-            if not s then clearAll() end
-        end, y)
-        y = g:CreateToggle("Boxes", ESP.Config.Boxes, function(s) ESP.Config.Boxes = s end, y)
-        y = g:CreateToggle("Chams", ESP.Config.Chams, function(s) ESP.Config.Chams = s end, y)
-        y = g:CreateToggle("Names", ESP.Config.Names, function(s) ESP.Config.Names = s end, y)
-        y = g:CreateToggle("Health", ESP.Config.Health, function(s) ESP.Config.Health = s end, y)
-        y = g:CreateToggle("Weapon", ESP.Config.Weapon, function(s) ESP.Config.Weapon = s end, y)
-        y = g:CreateToggle("Distance", ESP.Config.Distance, function(s) ESP.Config.Distance = s end, y)
-        y = g:CreateToggle("Tracers", ESP.Config.Tracers, function(s)
-            ESP.Config.Tracers = s
-            if not s then clearSourceAttachment() end
-        end, y)
-        y = g:CreateToggle("Team Check", ESP.Config.TeamCheck, function(s) ESP.Config.TeamCheck = s end, y)
-        y = g:CreateSlider("Render Distance", 10, 2500, ESP.Config.RenderDistance, function(v)
-            ESP.Config.RenderDistance = v
-        end, y)
-        y = g:CreateToggle("Debug", ESP.Config.Debug, function(s) ESP.Config.Debug = s end, y)
+        local ok, err = pcall(function()
+            local y = g:CreateSection("ESP", 0)
+            y = g:CreateToggle("Enabled", ESP.Config.Enabled, function(s)
+                ESP.Config.Enabled = s
+                if not s then clearAll() end
+            end, y)
+            y = g:CreateToggle("Boxes", ESP.Config.Boxes, function(s) ESP.Config.Boxes = s end, y)
+            y = g:CreateToggle("Fill", ESP.Config.Fill, function(s) ESP.Config.Fill = s end, y)
+            y = g:CreateToggle("Chams", ESP.Config.Chams, function(s) ESP.Config.Chams = s end, y)
+            y = g:CreateToggle("Names", ESP.Config.Names, function(s) ESP.Config.Names = s end, y)
+            y = g:CreateToggle("Health", ESP.Config.Health, function(s) ESP.Config.Health = s end, y)
+            y = g:CreateToggle("Weapon", ESP.Config.Weapon, function(s) ESP.Config.Weapon = s end, y)
+            y = g:CreateToggle("Distance", ESP.Config.Distance, function(s) ESP.Config.Distance = s end, y)
+            y = g:CreateToggle("Tracers", ESP.Config.Tracers, function(s)
+                ESP.Config.Tracers = s
+                if not s then clearSourceAttachment() end
+            end, y)
+            y = g:CreateToggle("Team Check", ESP.Config.TeamCheck, function(s) ESP.Config.TeamCheck = s end, y)
+            y = g:CreateSlider("Render Distance", 10, 2500, ESP.Config.RenderDistance, function(v)
+                ESP.Config.RenderDistance = v
+            end, y)
+            y = g:CreateToggle("Debug", ESP.Config.Debug, function(s) ESP.Config.Debug = s end, y)
 
-        y = g:CreateSection("ESP Color", y + 10)
-        y = g:CreateColorPicker("Color", ESP.Config.Color, function(c) ESP.SetColor(c) end, y)
+            y = g:CreateSection("Chams", y + 10)
+            y = g:CreateDropdown("Material", CHAM_MATERIALS, ESP.Config.ChamsMaterial, function(v)
+                ESP.Config.ChamsMaterial = v
+            end, y)
+            y = g:CreateSlider("Chams Transparency", 0, 90, math.floor(ESP.Config.ChamsTransparency * 100), function(v)
+                ESP.Config.ChamsTransparency = v / 100
+            end, y)
+
+            y = g:CreateSection("ESP Color", y + 10)
+            y = g:CreateColorPicker("Color", ESP.Config.Color, function(c) ESP.SetColor(c) end, y)
+        end)
+
+        if not ok then
+            warn("[ENI ESP] Visuals tab build error: " .. tostring(err))
+        end
 
         g.Content = originalContent
     end)
