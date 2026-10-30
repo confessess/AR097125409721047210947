@@ -470,12 +470,12 @@ function Gui:Init()
     Content.ZIndex = 2
     Content.Parent = Main
 
-    --// Content background image — a child of Content at ZIndex 1, so it is a
-    --// real sibling of every module element (all of which sit at 3 or above).
+    --// Content background image — lives in the Background layer (ZIndex 1) so
+    --// the entire Content frame composites above it.
     local ContentBg = Instance.new("ImageLabel")
     ContentBg.Name = "ContentBackground"
-    ContentBg.Size = UDim2.fromScale(1, 1)
-    ContentBg.Position = UDim2.fromOffset(0, 0)
+    ContentBg.Size = UDim2.new(1, -228, 1, -92)
+    ContentBg.Position = UDim2.fromOffset(200, 78)
     ContentBg.BackgroundColor3 = BACKGROUND
     ContentBg.BackgroundTransparency = 1
     ContentBg.BorderSizePixel = 0
@@ -484,7 +484,7 @@ function Gui:Init()
     ContentBg.ScaleType = Enum.ScaleType.Crop
     ContentBg.Visible = false
     ContentBg.ZIndex = 1
-    ContentBg.Parent = Content
+    ContentBg.Parent = Background
 
     local ContentBgOverlay = Instance.new("Frame")
     ContentBgOverlay.Name = "Overlay"
@@ -813,7 +813,13 @@ end
 
 function Gui:SetTabRebuild(name, callback)
     local tab = self:GetTab(name)
-    if tab then tab.Rebuild = callback end
+    if not tab then return end
+    tab.Rebuild = callback
+    --// the first tab is switched to before any module registers its builder,
+    --// so build it now instead of leaving it blank until the next tab click
+    if callback and self.CurrentTab == name then
+        callback(self)
+    end
 end
 
 function Gui:CreateScrollContent()
