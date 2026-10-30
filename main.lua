@@ -34,13 +34,13 @@ if not Gui or type(Gui.CreateTab) ~= "function" then
     return
 end
 
-Gui:CreateTab("Combat", "Aimbot, silent aim, hitbox, kill all.")
-Gui:CreateTab("Visuals", "ESP and world rendering.")
-Gui:CreateTab("Weapon", "No recoil, no spread, rapid fire, infinite ammo, fast reload, viewmodel chams.")
-Gui:CreateTab("Movement", "Speed, jump, and fly settings.")
-Gui:CreateTab("Skin Changer", "Announcers, arms, and melee skins.")
-Gui:CreateTab("World", "World modifications.")
-Gui:CreateTab("Settings", "GUI preferences, keybinds, configs.")
+Gui:CreateTab("Combat", "")
+Gui:CreateTab("Visuals", "")
+Gui:CreateTab("Weapon", "")
+Gui:CreateTab("Movement", "")
+Gui:CreateTab("Skin Changer", "")
+Gui:CreateTab("World", "")
+Gui:CreateTab("Settings", "")
 
 if CombatModule and type(CombatModule.Init) == "function" then
     CombatModule:Init(Gui)
