@@ -1054,9 +1054,6 @@ function Combat:Init(Gui)
         y = g:CreateDropdown("Hit Part", {"Head", "Body", "Random"}, Combat.Config.SilentAimMode, function(val)
             Combat.Config.SilentAimMode = val
         end, y)
-        y = g:CreateToggle("Prediction", Combat.Config.SilentAimPrediction, function(state)
-            Combat.Config.SilentAimPrediction = state
-        end, y)
         y = g:CreateToggle("Show Silent FOV", Combat.Config.SilentAimFOVVisible, function(state)
             Combat.Config.SilentAimFOVVisible = state
             UpdateFOVCircle()
