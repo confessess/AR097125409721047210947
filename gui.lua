@@ -13,15 +13,9 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 -- Roblox cannot load raw https:// in an ImageLabel, so the bytes are downloaded,
 -- cached to disk and served through getcustomasset.
 -- Override the source at runtime with: getgenv().BlackoutBgUrl = "https://..."
--- Silence the diagnostics with: getgenv().BlackoutBgQuiet = true
 local BACKGROUND_IMAGE_URL = (getgenv and getgenv().BlackoutBgUrl)
     or "https://files.catbox.moe/60cyzp.png"
 local ASSET_DIR = "blackout_assets"
-
-local function BgLog(msg)
-    if getgenv and getgenv().BlackoutBgQuiet then return end
-    warn("[ENI/bg] " .. tostring(msg))
-end
 
 --// Colors — Huohuo (green) palette
 local BLACK      = Color3.fromRGB(8, 14, 12)
@@ -98,9 +92,6 @@ local function FetchBody(url)
         if ok and res and res.Body then
             local status = res.StatusCode
             if status == nil or status < 400 then return res.Body end
-            BgLog("HTTP " .. tostring(status))
-        elseif not ok then
-            BgLog("request() errored: " .. tostring(res))
         end
     end
     local okGet, body = pcall(function() return game:HttpGet(url, true) end)
@@ -136,9 +127,9 @@ local function ToCustomAsset(path)
 end
 
 local function LoadRemoteImage(url)
-    if type(url) ~= "string" or url == "" then return nil, "no url" end
-    if not writefile then return nil, "executor has no writefile" end
-    if not getcustomasset then return nil, "executor has no getcustomasset" end
+    if type(url) ~= "string" or url == "" then return nil end
+    if not writefile then return nil end
+    if not getcustomasset then return nil end
 
     if makefolder then pcall(makefolder, ASSET_DIR) end
 
@@ -149,11 +140,7 @@ local function LoadRemoteImage(url)
         local okExists, exists = pcall(isfile, cachedPath)
         if okExists and exists then
             local cachedAsset = ToCustomAsset(cachedPath)
-            if cachedAsset then
-                BgLog("loaded from disk cache")
-                return cachedAsset
-            end
-            BgLog("cache file present but getcustomasset rejected it")
+            if cachedAsset then return cachedAsset end
         end
     end
 
@@ -161,11 +148,10 @@ local function LoadRemoteImage(url)
     for attempt = 1, 3 do
         body = FetchBody(url)
         if body then break end
-        BgLog("download attempt " .. attempt .. " failed")
         task.wait(attempt * 0.7)
     end
-    if not body then return nil, "download failed" end
-    if #body < 128 then return nil, "response too short (" .. #body .. " bytes)" end
+    if not body then return nil end
+    if #body < 128 then return nil end
 
     local magic = string.sub(body, 1, 4)
     local ext
@@ -174,19 +160,13 @@ local function LoadRemoteImage(url)
     elseif string.sub(body, 1, 3) == "\255\216\255" then
         ext = "jpg"
     else
-        BgLog("body is not an image, starts with: " .. string.sub(body, 1, 48):gsub("%c", " "))
-        return nil, "response is not PNG/JPG"
+        return nil
     end
 
     local path = ASSET_DIR .. "/bg_" .. key .. "." .. ext
-    local okWrite, writeErr = pcall(writefile, path, body)
-    if not okWrite then return nil, "writefile failed: " .. tostring(writeErr) end
+    if not pcall(writefile, path, body) then return nil end
 
-    local asset = ToCustomAsset(path)
-    if not asset then return nil, "getcustomasset failed" end
-
-    BgLog("applied (" .. #body .. " bytes)")
-    return asset
+    return ToCustomAsset(path)
 end
 
 --// Keybind helpers
@@ -285,12 +265,10 @@ end
 
 function Gui:ReloadBackground()
     task.spawn(function()
-        local asset, err = LoadRemoteImage(BACKGROUND_IMAGE_URL)
+        local asset = LoadRemoteImage(BACKGROUND_IMAGE_URL)
         if asset and self.ContentBg then
             self.ContentBg.Image = asset
             self.ContentBg.Visible = true
-        else
-            BgLog("reload failed: " .. tostring(err))
         end
     end)
 end
@@ -515,12 +493,10 @@ function Gui:Init()
     ContentBgStroke.Parent = ContentBg
 
     task.spawn(function()
-        local asset, err = LoadRemoteImage(BACKGROUND_IMAGE_URL)
+        local asset = LoadRemoteImage(BACKGROUND_IMAGE_URL)
         if asset and ContentBg.Parent then
             ContentBg.Image = asset
             ContentBg.Visible = true
-        else
-            BgLog("background not applied: " .. tostring(err))
         end
     end)
 
