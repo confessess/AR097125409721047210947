@@ -471,6 +471,7 @@ function Gui:Init()
     Content.Parent = Main
 
     --// Content background image (main module area only)
+    --// ZIndex 1 so it sorts behind Content in Main's sibling order.
     local ContentBg = Instance.new("ImageLabel")
     ContentBg.Name = "ContentBackground"
     ContentBg.Size = UDim2.new(1, -228, 1, -92)
@@ -482,7 +483,7 @@ function Gui:Init()
     ContentBg.ImageTransparency = 0.05
     ContentBg.ScaleType = Enum.ScaleType.Crop
     ContentBg.Visible = false
-    ContentBg.ZIndex = 2
+    ContentBg.ZIndex = 1
     ContentBg.Parent = Main
 
     local ContentBgOverlay = Instance.new("Frame")
@@ -491,7 +492,7 @@ function Gui:Init()
     ContentBgOverlay.BackgroundColor3 = BACKGROUND
     ContentBgOverlay.BackgroundTransparency = 0.42
     ContentBgOverlay.BorderSizePixel = 0
-    ContentBgOverlay.ZIndex = 2
+    ContentBgOverlay.ZIndex = 1
     ContentBgOverlay.Parent = ContentBg
 
     local OverlayGrad = Instance.new("UIGradient")
@@ -1332,7 +1333,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
 
             local inPopup = mousePos.X >= absPos.X and mousePos.X <= absPos.X + absSize.X and
                            mousePos.Y >= absPos.Y and mousePos.Y <= absPos.Y + absSize.Y
-            local inBtn = mousePos.X >= btnPos.X and mousePos.X <= btnPos.X + btnSize.X and
+            local inBtn = mousePos.X >= btnPos.X and mousePos.X <= btnPos.X + absSize.X and
                          mousePos.Y >= btnPos.Y and mousePos.Y <= btnPos.Y + btnSize.Y
 
             if not inPopup and not inBtn then
