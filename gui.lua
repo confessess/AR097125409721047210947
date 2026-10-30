@@ -1672,6 +1672,67 @@ function Gui:CreateColorPicker(label, defaultColor, callback, y)
     return y + 42
 end
 
+--// ═══════════════════════════════════════════════════════════════
+--//  TEXT INPUT
+--// ═══════════════════════════════════════════════════════════════
+function Gui:CreateTextInput(label, default, placeholder, callback, y)
+    local accent = self.CurrentAccent or DEFAULT_ACCENT
+
+    local Frame = Instance.new("Frame")
+    Frame.Size = UDim2.new(1, 0, 0, 36)
+    Frame.Position = UDim2.fromOffset(0, y)
+    Frame.BackgroundTransparency = 1
+    Frame.ZIndex = 3
+    Frame.Parent = self.Content
+
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(1, -174, 0, 36)
+    Label.BackgroundTransparency = 1
+    Label.Text = label
+    Label.TextColor3 = Tint(accent, 0.72)
+    Label.TextSize = 13
+    Label.Font = Enum.Font.GothamMedium
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.ZIndex = 4
+    Label.Parent = Frame
+
+    local Box = Instance.new("TextBox")
+    Box.Size = UDim2.fromOffset(150, 28)
+    Box.Position = UDim2.new(1, -174, 0, 4)
+    Box.BackgroundColor3 = DARK_PANEL
+    Box.BorderSizePixel = 0
+    Box.Text = default or ""
+    Box.PlaceholderText = placeholder or ""
+    Box.PlaceholderColor3 = Shade(Tint(accent, 0.35), 0.45)
+    Box.TextColor3 = LIGHT
+    Box.TextSize = 11
+    Box.Font = Enum.Font.GothamMedium
+    Box.TextXAlignment = Enum.TextXAlignment.Left
+    Box.ClearTextOnFocus = false
+    Box.ZIndex = 4
+    Box.Parent = Frame
+
+    local BoxStroke = Instance.new("UIStroke")
+    BoxStroke.Color = Shade(accent, 0.6)
+    BoxStroke.Thickness = 1
+    BoxStroke.Parent = Box
+
+    Box.Focused:Connect(function()
+        BoxStroke.Color = accent
+        Box.BackgroundColor3 = Shade(accent, 0.86)
+    end)
+    Box.FocusLost:Connect(function()
+        BoxStroke.Color = Shade(accent, 0.6)
+        Box.BackgroundColor3 = DARK_PANEL
+        if callback then callback(Box.Text) end
+    end)
+    Box:GetPropertyChangedSignal("Text"):Connect(function()
+        if callback then callback(Box.Text) end
+    end)
+
+    return y + 42
+end
+
 function Gui:CreateButton(label, callback, y)
     local accent = self.CurrentAccent or DEFAULT_ACCENT
     local Btn = Instance.new("TextButton")
