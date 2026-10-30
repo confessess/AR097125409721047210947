@@ -33,6 +33,10 @@ ESP.Config = {
 }
 
 local METERS_PER_STUD = 0.28
+local LABEL_WIDTH = 300
+local LINE_HEIGHT = 15
+local LINE_GAP = 2
+local MAX_LINES = 4
 
 local Visuals = {}
 local TracerFolder = nil
@@ -129,15 +133,15 @@ local function readHealth(player, character, humanoid)
         if curValue then break end
     end
 
-    local max = (maxValue and maxValue.Value)
-        or (humanoid and humanoid.MaxHealth)
-        or (character:GetAttribute("MaxHealth"))
+    local max = tonumber(maxValue and maxValue.Value)
+        or tonumber(humanoid and humanoid.MaxHealth)
+        or tonumber(character:GetAttribute("MaxHealth"))
         or 100
     max = math.max(1, max)
 
-    local current = (curValue and curValue.Value)
-        or character:GetAttribute("Health")
-        or (humanoid and humanoid.Health)
+    local current = tonumber(curValue and curValue.Value)
+        or tonumber(character:GetAttribute("Health"))
+        or tonumber(humanoid and humanoid.Health)
         or max
 
     if current > max then max = current end
@@ -296,7 +300,7 @@ local function createVisual(player)
 
     local billboard = Instance.new("BillboardGui")
     billboard.Name = "ENI_Label_" .. player.Name
-    billboard.Size = UDim2.fromOffset(320, 90)
+    billboard.Size = UDim2.fromOffset(LABEL_WIDTH, LINE_HEIGHT * 2)
     billboard.StudsOffsetWorldSpace = Vector3.new(0, 7, 0)
     billboard.AlwaysOnTop = true
     billboard.LightInfluence = 0
@@ -304,19 +308,45 @@ local function createVisual(player)
     billboard.Enabled = false
     billboard.Parent = ensureGui()
 
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.fromScale(1, 1)
-    label.BackgroundTransparency = 1
-    label.TextColor3 = ESP.Config.Color
-    label.TextStrokeColor3 = Color3.new(0, 0, 0)
-    label.TextStrokeTransparency = 0.1
-    label.Font = Enum.Font.GothamBold
-    label.TextSize = 13
-    label.TextWrapped = true
-    label.RichText = true
-    label.TextYAlignment = Enum.TextYAlignment.Center
-    label.ZIndex = 3
-    label.Parent = billboard
+    --// one label per line, stacked by a list layout. A single wrapped label
+    --// reflows every line into one centred block and they visually merge.
+    local stack = Instance.new("Frame")
+    stack.Name = "Stack"
+    stack.Size = UDim2.fromScale(1, 1)
+    stack.BackgroundTransparency = 1
+    stack.ZIndex = 3
+    stack.Parent = billboard
+
+    local layout = Instance.new("UIListLayout")
+    layout.FillDirection = Enum.FillDirection.Vertical
+    layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    layout.VerticalAlignment = Enum.VerticalAlignment.Center
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, LINE_GAP)
+    layout.Parent = stack
+
+    local lines = {}
+    for index = 1, MAX_LINES do
+        local line = Instance.new("TextLabel")
+        line.Name = "Line" .. index
+        line.LayoutOrder = index
+        line.Size = UDim2.new(1, 0, 0, LINE_HEIGHT)
+        line.BackgroundTransparency = 1
+        line.Text = ""
+        line.TextColor3 = ESP.Config.Color
+        line.TextStrokeColor3 = Color3.new(0, 0, 0)
+        line.TextStrokeTransparency = 0.35
+        line.Font = Enum.Font.GothamBold
+        line.TextSize = 12
+        line.TextWrapped = false
+        line.RichText = true
+        line.TextXAlignment = Enum.TextXAlignment.Center
+        line.TextYAlignment = Enum.TextYAlignment.Center
+        line.Visible = false
+        line.ZIndex = 4
+        line.Parent = stack
+        lines[index] = line
+    end
 
     local tracer = Instance.new("Beam")
     tracer.Name = "ENI_Tracer_" .. player.Name
@@ -341,7 +371,7 @@ local function createVisual(player)
         tintDecals = {},
         tintAppearances = {},
         billboard = billboard,
-        label = label,
+        lines = lines,
         tracer = tracer,
         tracerAttachment = nil,
         tracerCharacter = nil,
@@ -512,6 +542,25 @@ local function syncTint(v, character, enabled)
     end
 end
 
+--// ── label stack ────────────────────────────────────────────────
+local function clearLines(v)
+    for _, line in ipairs(v.lines) do
+        if line.Visible then
+            line.Visible = false
+            line.Text = ""
+        end
+    end
+end
+
+local function pushLine(v, index, text, color)
+    local line = v.lines[index]
+    if not line then return end
+    line.Text = text
+    line.TextColor3 = color
+    line.LayoutOrder = index
+    line.Visible = true
+end
+
 --// ── main loop ──────────────────────────────────────────────────
 local function step()
     local cfg = ESP.Config
@@ -528,6 +577,7 @@ local function step()
             if v.tracer then v.tracer.Enabled = false end
             if v.highlight then destroyHighlight(v) end
             if next(v.tintData) then clearTint(v) end
+            clearLines(v)
         end
         return
     end
@@ -583,7 +633,7 @@ local function step()
                 reason = "same team"
             end
             if not reason and studs > cfg.RenderDistance then
-                reason = string.format("too far (%.0f)", studs)
+                reason = "too far"
             end
 
             if reason == nil then
@@ -621,32 +671,54 @@ local function step()
                 v.billboard.Adornee = head
 
                 local meters = studs * METERS_PER_STUD
-                local lines = {}
+                clearLines(v)
+                local lineIndex = 0
+
                 if cfg.Names then
-                    lines[#lines + 1] = '<font color="' .. hex .. '"><b>'
-                        .. escapeRichText(player.DisplayName) .. '</b></font>'
-                end
-                if cfg.Health then
-                    local cur, max = readHealth(player, character, humanoid)
-                    local ratio = math.clamp(cur / max, 0, 1)
-                    lines[#lines + 1] = '<font color="#AEB9C2">HP </font>'
-                        .. '<font color="' .. healthColor(ratio) .. '"><b>'
-                        .. math.floor(cur + 0.5) .. '</b></font>'
-                        .. '<font color="#AEB9C2">/</font>'
-                        .. '<font color="#55DDFF"><b>' .. math.floor(max + 0.5) .. '</b></font>'
-                end
-                if cfg.Weapon then
-                    local weapon = readWeapon(player, character)
-                    lines[#lines + 1] = '<font color="#E7EDF2">'
-                        .. escapeRichText(weapon or "None") .. '</font>'
-                end
-                if cfg.Distance and meters >= 10 then
-                    lines[#lines + 1] = '<font color="#E7EDF2">' .. formatMeters(meters) .. '</font>'
+                    lineIndex = lineIndex + 1
+                    pushLine(v, lineIndex,
+                        '<b>' .. escapeRichText(player.DisplayName) .. '</b>',
+                        cfg.Color)
                 end
 
-                v.label.Text = table.concat(lines, "\n")
-                v.label.TextColor3 = cfg.Color
-                v.billboard.Enabled = #lines > 0
+                if cfg.Health then
+                    local cur, max = readHealth(player, character, humanoid)
+                    cur = math.max(0, math.floor((tonumber(cur) or 0) + 0.5))
+                    max = math.max(1, math.floor((tonumber(max) or 100) + 0.5))
+                    local ratio = math.clamp(cur / max, 0, 1)
+                    lineIndex = lineIndex + 1
+                    pushLine(v, lineIndex,
+                        '<font color="#AEB9C2">HP </font>'
+                            .. '<font color="' .. healthColor(ratio) .. '"><b>'
+                            .. string.format("%d", cur) .. '</b></font>'
+                            .. '<font color="#AEB9C2">/</font>'
+                            .. '<font color="#55DDFF"><b>' .. string.format("%d", max) .. '</b></font>',
+                        Color3.fromRGB(231, 237, 242))
+                end
+
+                if cfg.Weapon then
+                    lineIndex = lineIndex + 1
+                    pushLine(v, lineIndex,
+                        escapeRichText(readWeapon(player, character) or "None"),
+                        Color3.fromRGB(231, 237, 242))
+                end
+
+                if cfg.Distance and meters >= 10 then
+                    lineIndex = lineIndex + 1
+                    pushLine(v, lineIndex,
+                        formatMeters(meters),
+                        Color3.fromRGB(231, 237, 242))
+                end
+
+                if lineIndex > 0 then
+                    v.billboard.Size = UDim2.fromOffset(
+                        LABEL_WIDTH,
+                        lineIndex * LINE_HEIGHT + (lineIndex - 1) * LINE_GAP + 2
+                    )
+                    v.billboard.Enabled = true
+                else
+                    v.billboard.Enabled = false
+                end
 
                 if v.tracerCharacter ~= character
                     or not v.tracerAttachment
@@ -671,6 +743,7 @@ local function step()
                 if v.fill then v.fill.Visible = false end
                 if v.highlight then destroyHighlight(v) end
                 if next(v.tintData) then clearTint(v) end
+                clearLines(v)
                 v.billboard.Enabled = false
                 v.tracer.Enabled = false
             end
@@ -706,7 +779,9 @@ function ESP.SetColor(c)
     ESP.Config.Color = c
     for _, v in pairs(Visuals) do
         v.tracer.Color = ColorSequence.new(c)
-        v.label.TextColor3 = c
+        for _, line in ipairs(v.lines) do
+            if line.Visible then line.TextColor3 = c end
+        end
         if v.box then v.box.Color = c end
         if v.fill then v.fill.Color = c end
         if v.highlight then
