@@ -12,8 +12,16 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 --// Background image (content panel only)
 -- Roblox cannot load raw https:// in an ImageLabel, so the bytes are downloaded,
 -- cached to disk and served through getcustomasset.
-local BACKGROUND_IMAGE_URL = "https://files.catbox.moe/60cyzp.png"
+-- Override the source at runtime with: getgenv().BlackoutBgUrl = "https://..."
+-- Silence the diagnostics with: getgenv().BlackoutBgQuiet = true
+local BACKGROUND_IMAGE_URL = (getgenv and getgenv().BlackoutBgUrl)
+    or "https://files.catbox.moe/60cyzp.png"
 local ASSET_DIR = "blackout_assets"
+
+local function BgLog(msg)
+    if getgenv and getgenv().BlackoutBgQuiet then return end
+    warn("[ENI/bg] " .. tostring(msg))
+end
 
 --// Colors — Huohuo (green) palette
 local BLACK      = Color3.fromRGB(8, 14, 12)
@@ -74,62 +82,111 @@ local function HashString(str)
     return string.format("%x", h)
 end
 
-local function HttpGetBody(url)
-    local body
-    local ok = pcall(function()
-        local req = (syn and syn.request) or request or http_request
-        if req then
-            local res = req({ Url = url, Method = "GET" })
-            if res and (res.StatusCode == nil or res.StatusCode < 400) then
-                body = res.Body
-            end
-        else
-            body = game:HttpGet(url)
+-- Sends browser-ish headers because plain HttpGet is refused by some hosts.
+local function FetchBody(url)
+    local req = (syn and syn.request) or (http and http.request) or request or http_request
+    if req then
+        local ok, res = pcall(req, {
+            Url = url,
+            Method = "GET",
+            Headers = {
+                ["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                ["Referer"] = "https://catbox.moe/",
+                ["Accept"] = "image/png,image/*;q=0.8,*/*;q=0.5",
+            },
+        })
+        if ok and res and res.Body then
+            local status = res.StatusCode
+            if status == nil or status < 400 then return res.Body end
+            BgLog("HTTP " .. tostring(status))
+        elseif not ok then
+            BgLog("request() errored: " .. tostring(res))
         end
-    end)
-    if not ok or type(body) ~= "string" then return nil end
-    return body
+    end
+    local okGet, body = pcall(function() return game:HttpGet(url, true) end)
+    if okGet and type(body) == "string" and body ~= "" then return body end
+    return nil
+end
+
+-- getcustomasset wants a path inside the workspace folder on some executors
+-- and an absolute path on others, so try both.
+local function ToCustomAsset(path)
+    local candidates = { path }
+    if getworkspacefolder then
+        local okWs, ws = pcall(getworkspacefolder)
+        if okWs and type(ws) == "string" and ws ~= "" then
+            candidates[#candidates + 1] = ws .. "/" .. path
+        end
+    elseif getworkspace then
+        local okWs, ws = pcall(getworkspace)
+        if okWs and ws then
+            local okStr, wsStr = pcall(function() return tostring(ws) end)
+            if okStr and type(wsStr) == "string" and wsStr ~= "" and wsStr:find("\\", 1, true) then
+                candidates[#candidates + 1] = wsStr .. "\\" .. path
+            end
+        end
+    end
+    for _, candidate in ipairs(candidates) do
+        local ok, asset = pcall(getcustomasset, candidate)
+        if ok and type(asset) == "string" and asset ~= "" then
+            return asset
+        end
+    end
+    return nil
 end
 
 local function LoadRemoteImage(url)
-    if type(url) ~= "string" or url == "" then return nil end
-    if not (writefile and getcustomasset) then return nil end
+    if type(url) ~= "string" or url == "" then return nil, "no url" end
+    if not writefile then return nil, "executor has no writefile" end
+    if not getcustomasset then return nil, "executor has no getcustomasset" end
 
     if makefolder then pcall(makefolder, ASSET_DIR) end
 
     local key = HashString(url)
-    local path = ASSET_DIR .. "/bg_" .. key .. ".png"
+    local cachedPath = ASSET_DIR .. "/bg_" .. key .. ".png"
 
     if isfile then
-        local okExists, exists = pcall(isfile, path)
+        local okExists, exists = pcall(isfile, cachedPath)
         if okExists and exists then
-            local okAsset, asset = pcall(getcustomasset, path)
-            if okAsset and type(asset) == "string" and asset ~= "" then
-                return asset
+            local cachedAsset = ToCustomAsset(cachedPath)
+            if cachedAsset then
+                BgLog("loaded from disk cache")
+                return cachedAsset
             end
+            BgLog("cache file present but getcustomasset rejected it")
         end
     end
 
-    local body = HttpGetBody(url)
-    if not body or #body < 64 then return nil end
+    local body
+    for attempt = 1, 3 do
+        body = FetchBody(url)
+        if body then break end
+        BgLog("download attempt " .. attempt .. " failed")
+        task.wait(attempt * 0.7)
+    end
+    if not body then return nil, "download failed" end
+    if #body < 128 then return nil, "response too short (" .. #body .. " bytes)" end
 
     local magic = string.sub(body, 1, 4)
+    local ext
     if magic == "\137PNG" then
-        path = ASSET_DIR .. "/bg_" .. key .. ".png"
+        ext = "png"
     elseif string.sub(body, 1, 3) == "\255\216\255" then
-        path = ASSET_DIR .. "/bg_" .. key .. ".jpg"
+        ext = "jpg"
     else
-        return nil
+        BgLog("body is not an image, starts with: " .. string.sub(body, 1, 48):gsub("%c", " "))
+        return nil, "response is not PNG/JPG"
     end
 
-    local okWrite = pcall(writefile, path, body)
-    if not okWrite then return nil end
+    local path = ASSET_DIR .. "/bg_" .. key .. "." .. ext
+    local okWrite, writeErr = pcall(writefile, path, body)
+    if not okWrite then return nil, "writefile failed: " .. tostring(writeErr) end
 
-    local okAsset, asset = pcall(getcustomasset, path)
-    if okAsset and type(asset) == "string" and asset ~= "" then
-        return asset
-    end
-    return nil
+    local asset = ToCustomAsset(path)
+    if not asset then return nil, "getcustomasset failed" end
+
+    BgLog("applied (" .. #body .. " bytes)")
+    return asset
 end
 
 --// State
@@ -220,6 +277,18 @@ function Gui:ReleaseAllHolds()
     for btn, entry in pairs(self.ActiveHolds) do
         if entry and entry.Release then entry.Release() end
     end
+end
+
+function Gui:ReloadBackground()
+    task.spawn(function()
+        local asset, err = LoadRemoteImage(BACKGROUND_IMAGE_URL)
+        if asset and self.ContentBg then
+            self.ContentBg.Image = asset
+            self.ContentBg.Visible = true
+        else
+            BgLog("reload failed: " .. tostring(err))
+        end
+    end)
 end
 
 function Gui:Init()
@@ -441,10 +510,12 @@ function Gui:Init()
     ContentBgStroke.Parent = ContentBg
 
     task.spawn(function()
-        local asset = LoadRemoteImage(BACKGROUND_IMAGE_URL)
+        local asset, err = LoadRemoteImage(BACKGROUND_IMAGE_URL)
         if asset and ContentBg.Parent then
             ContentBg.Image = asset
             ContentBg.Visible = true
+        else
+            BgLog("background not applied: " .. tostring(err))
         end
     end)
 
