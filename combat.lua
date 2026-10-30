@@ -43,7 +43,10 @@ Combat.Config = {
     HeadHBSize = 20,
     AimKey = Enum.UserInputType.MouseButton2,
     KillAll = false,
-    KillAllFloorMargin = 120,
+    --// Map-only targeting (rejects players parked in the menu pit)
+    MapFilter = true,
+    KillAllMapMargin = 30,      --// slack around the map bounding box
+    KillAllFloorMargin = 120,   --// fallback: max allowed drop below the map
     HitsoundsEnabled = false,
     Hitsound = "Skeet.cc",
     HitsoundVolume = 1,
@@ -105,6 +108,113 @@ local function IsVisible(targetPart, override)
     return false
 end
 
+--// ═══════════════════════════════════════════════════════════════
+--//  MAP ANCHOR
+--//  Menu-parked players are technically alive but sit far below the
+--//  playable map. Everything here is anchored to the map itself, never
+--//  to the local player, so teleporting around cannot shift the check.
+--// ═══════════════════════════════════════════════════════════════
+local MAP_NAMES = { "map", "gameMap", "MapFolder", "Arena" }
+local mapBounds, mapBoundsAt, mapBoundsOk = nil, 0, false
+
+local function ComputeBounds(inst)
+    if not inst then return nil end
+    if inst:IsA("Model") then
+        local ok, cf, size = pcall(function()
+            return inst:GetBoundingBox()
+        end)
+        if ok and cf and size and size.Magnitude > 1 then
+            return cf, size
+        end
+        return nil
+    end
+    local minV, maxV
+    for _, d in ipairs(inst:GetDescendants()) do
+        if d:IsA("BasePart") then
+            local p, half = d.Position, d.Size * 0.5
+            minV = minV and Vector3.new(
+                math.min(minV.X, p.X - half.X), math.min(minV.Y, p.Y - half.Y), math.min(minV.Z, p.Z - half.Z)
+            ) or (p - half)
+            maxV = maxV and Vector3.new(
+                math.max(maxV.X, p.X + half.X), math.max(maxV.Y, p.Y + half.Y), math.max(maxV.Z, p.Z + half.Z)
+            ) or (p + half)
+        end
+    end
+    if minV and maxV then
+        return CFrame.new((minV + maxV) * 0.5), (maxV - minV)
+    end
+    return nil
+end
+
+local function GetMapBounds()
+    local now = tick()
+    if mapBoundsOk and now - mapBoundsAt < 2 then
+        return mapBounds and mapBounds.cf, mapBounds and mapBounds.size
+    end
+    mapBoundsAt, mapBoundsOk = now, true
+
+    for _, name in ipairs(MAP_NAMES) do
+        for _, obj in ipairs(Workspace:GetChildren()) do
+            if obj.Name:lower() == name:lower() and (obj:IsA("Model") or obj:IsA("Folder")) then
+                local cf, size = ComputeBounds(obj)
+                if cf and size then
+                    mapBounds = { cf = cf, size = size }
+                    return cf, size
+                end
+            end
+        end
+    end
+
+    mapBounds = nil
+    return nil, nil
+end
+
+--// Fallback anchor: the highest alive root is always on the map,
+--// never in the menu pit. Cached briefly so it is cheap per frame.
+local highY, highYAt = nil, 0
+
+local function GetMapReferenceY()
+    local now = tick()
+    if highY and now - highYAt < 0.5 then return highY end
+    highYAt = now
+
+    local best = nil
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local char = plr.Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+        if root and humanoid and humanoid.Health > 0 then
+            if not best or root.Position.Y > best then
+                best = root.Position.Y
+            end
+        end
+    end
+    highY = best
+    return best
+end
+
+local function IsOnMap(char)
+    if Combat.Config.MapFilter == false then return true end
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return false end
+    if not char:IsDescendantOf(Workspace) then return false end
+
+    local cf, size = GetMapBounds()
+    if cf and size then
+        local margin = Combat.Config.KillAllMapMargin
+        local localPos = cf:PointToObjectSpace(root.Position)
+        local half = size * 0.5
+        return math.abs(localPos.X) <= half.X + margin
+            and math.abs(localPos.Z) <= half.Z + margin
+            and localPos.Y >= -half.Y - margin
+            and localPos.Y <= half.Y + margin
+    end
+
+    local refY = GetMapReferenceY()
+    if not refY then return true end
+    return root.Position.Y >= refY - Combat.Config.KillAllFloorMargin
+end
+
 local IsAiming = false
 local GetProjectedHitboxRadius
 local CurrentSilentTargetPlr = nil
@@ -151,6 +261,8 @@ local function IsValidTarget(plr)
         local alive = status:FindFirstChild("Alive")
         if alive and not alive.Value then return false end
     end
+    --// not standing on the map (menu pit / spectating area)
+    if not IsOnMap(char) then return false end
     local wkspc = ReplicatedStorage:FindFirstChild("wkspc")
     local ffa = wkspc and wkspc:FindFirstChild("FFA")
     local isFFA = ffa and ffa.Value
@@ -695,22 +807,16 @@ local killAllActive = false
 local killAllSavedPos = nil
 local killAllRestored = false
 
---// Only players standing on the actual map count. Players parked in the
---// menu lobby sit far below the playable area, so a Y floor relative to the
---// local player filters them out. IsValidTarget also rejects unspawned/dead.
+--// IsValidTarget already rejects anyone off the map, so no Y math here.
 local function GetClosestEnemyForKillAll(myRoot)
     if not myRoot then return nil end
-    local floorY = myRoot.Position.Y - Combat.Config.KillAllFloorMargin
     local closest, closestDist = nil, math.huge
 
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and IsValidTarget(player) then
+        if IsValidTarget(player) then
             local char = player.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
-            local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-            if root and humanoid and humanoid.Health > 0
-                and char:IsDescendantOf(Workspace)
-                and root.Position.Y >= floorY then
+            if root then
                 local dist = (root.Position - myRoot.Position).Magnitude
                 if dist < closestDist then
                     closestDist = dist
@@ -738,7 +844,7 @@ local function KillAllTick()
         myRoot.CFrame = CFrame.new(targetRoot.Position - targetRoot.CFrame.LookVector * 5)
         Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetRoot.Position)
     elseif killAllSavedPos and not killAllRestored then
-        --// nobody on the map yet: go back to where kill all was toggled on
+        --// nobody on the map: go back to where kill all was toggled on
         myRoot.CFrame = killAllSavedPos
         killAllRestored = true
     end
@@ -974,6 +1080,12 @@ function Combat:Init(Gui)
         y = g:CreateSection("Kill All", y + 10)
         y = g:CreateToggle("Kill All", false, function(state)
             SetKillAll(state)
+        end, y)
+        y = g:CreateToggle("Ignore Menu Players", Combat.Config.MapFilter, function(state)
+            Combat.Config.MapFilter = state
+        end, y)
+        y = g:CreateSlider("Menu Drop Limit", 30, 500, Combat.Config.KillAllFloorMargin, function(val)
+            Combat.Config.KillAllFloorMargin = val
         end, y)
 
         y = g:CreateSection("Hitsounds", y + 10)
