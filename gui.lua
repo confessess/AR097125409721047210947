@@ -470,12 +470,12 @@ function Gui:Init()
     Content.ZIndex = 2
     Content.Parent = Main
 
-    --// Content background image (main module area only)
-    --// ZIndex 1 so it sorts behind Content in Main's sibling order.
+    --// Content background image — a child of Content at ZIndex 1, so it is a
+    --// real sibling of every module element (all of which sit at 3 or above).
     local ContentBg = Instance.new("ImageLabel")
     ContentBg.Name = "ContentBackground"
-    ContentBg.Size = UDim2.new(1, -228, 1, -92)
-    ContentBg.Position = UDim2.fromOffset(200, 78)
+    ContentBg.Size = UDim2.fromScale(1, 1)
+    ContentBg.Position = UDim2.fromOffset(0, 0)
     ContentBg.BackgroundColor3 = BACKGROUND
     ContentBg.BackgroundTransparency = 1
     ContentBg.BorderSizePixel = 0
@@ -484,7 +484,7 @@ function Gui:Init()
     ContentBg.ScaleType = Enum.ScaleType.Crop
     ContentBg.Visible = false
     ContentBg.ZIndex = 1
-    ContentBg.Parent = Main
+    ContentBg.Parent = Content
 
     local ContentBgOverlay = Instance.new("Frame")
     ContentBgOverlay.Name = "Overlay"
@@ -787,7 +787,9 @@ function Gui:SwitchTab(name)
     self:ReleaseAllHolds()
 
     for _, child in ipairs(self.Content:GetChildren()) do
-        if child ~= self.ContentTitle and child ~= self.ContentSubtitle then
+        if child ~= self.ContentTitle
+            and child ~= self.ContentSubtitle
+            and child ~= self.ContentBg then
             child:Destroy()
         end
     end
@@ -1333,7 +1335,7 @@ function Gui:CreateDropdown(label, options, default, callback, y)
 
             local inPopup = mousePos.X >= absPos.X and mousePos.X <= absPos.X + absSize.X and
                            mousePos.Y >= absPos.Y and mousePos.Y <= absPos.Y + absSize.Y
-            local inBtn = mousePos.X >= btnPos.X and mousePos.X <= btnPos.X + absSize.X and
+            local inBtn = mousePos.X >= btnPos.X and mousePos.X <= btnPos.X + btnSize.X and
                          mousePos.Y >= btnPos.Y and mousePos.Y <= btnPos.Y + btnSize.Y
 
             if not inPopup and not inBtn then
