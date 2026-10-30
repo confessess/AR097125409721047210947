@@ -1,6 +1,6 @@
 --// ═══════════════════════════════════════════════════════════════
 --//  MODULE: esp.lua
---//  Bounding box + full-body material chams + Billboard labels
+--//  Bounding box + Highlight chams + Billboard labels
 --// ═══════════════════════════════════════════════════════════════
 local ESP = {}
 ESP.__index = ESP
@@ -16,8 +16,9 @@ local LocalPlayer = Players.LocalPlayer
 ESP.Config = {
     Enabled = false,
     Boxes = false,
-    Chams = false,
     Fill = false,
+    Chams = false,
+    Tint = false,
     Names = false,
     Health = false,
     Distance = false,
@@ -27,7 +28,8 @@ ESP.Config = {
     RenderDistance = 1000,
     Color = Color3.fromRGB(255, 0, 45),
     ChamsTransparency = 0,
-    ChamsMaterial = "Neon",
+    ChamsDepth = "Always on top",
+    TintMaterial = "Neon",
     Debug = true,
 }
 
@@ -78,10 +80,17 @@ local function healthColor(ratio)
     return "#55DDFF"
 end
 
+local function depthMode()
+    if ESP.Config.ChamsDepth == "Occluded" then
+        return Enum.HighlightDepthMode.Occluded
+    end
+    return Enum.HighlightDepthMode.AlwaysOnTop
+end
+
 --// ── health ─────────────────────────────────────────────────────
 --// The Humanoid is pinned at 100 in MM2, so real health has to come from the
---// replicated value objects. First container that has a usable value wins;
---// the humanoid is only a fallback.
+--// replicated value objects. First container with a usable value wins; the
+--// humanoid is only a fallback.
 local function healthContainers(player, character)
     local list = {}
     local function add(container, deep)
@@ -270,6 +279,14 @@ local function newSquare(filled)
     return ok and d or nil
 end
 
+local function destroyHighlight(v)
+    if v.highlight then
+        pcall(function() v.highlight:Destroy() end)
+        v.highlight = nil
+    end
+    v.highlightCharacter = nil
+end
+
 local function destroyVisual(player)
     local v = Visuals[player]
     if not v then return end
@@ -279,6 +296,7 @@ local function destroyVisual(player)
     if v.tracerAttachment then pcall(function() v.tracerAttachment:Destroy() end) end
     if v.box then pcall(function() v.box:Remove() end) end
     if v.fill then pcall(function() v.fill:Remove() end) end
+    destroyHighlight(v)
 end
 
 local function clearAll()
@@ -330,8 +348,12 @@ local function createVisual(player)
     v = {
         box = newSquare(false),
         fill = newSquare(true),
-        chamData = {},
-        chamCharacter = nil,
+        highlight = nil,
+        highlightCharacter = nil,
+        tintData = {},
+        tintCharacter = nil,
+        tintDecals = {},
+        tintAppearances = {},
         billboard = billboard,
         label = label,
         tracer = tracer,
@@ -342,7 +364,7 @@ local function createVisual(player)
     return v
 end
 
---// ── single bounding box for the whole character ────────────────
+--// ── bounding box ───────────────────────────────────────────────
 local function characterScreenRect(character, cam)
     local cf, size
     local ok = pcall(function()
@@ -367,9 +389,48 @@ local function characterScreenRect(character, cam)
         Vector2.new(width, height)
 end
 
---// ── chams over every body part ─────────────────────────────────
-local function clearChams(v)
-    for part, data in pairs(v.chamData) do
+--// ── chams (Highlight) ──────────────────────────────────────────
+--// A Highlight traces the model's actual silhouette, so it outlines the body
+--// instead of filling a rectangle. Parented to the character so it dies with it.
+local function syncHighlight(v, character, enabled)
+    if not enabled then
+        if v.highlight then destroyHighlight(v) end
+        return
+    end
+
+    if v.highlightCharacter ~= character
+        or not v.highlight
+        or not v.highlight.Parent then
+        destroyHighlight(v)
+        local h = Instance.new("Highlight")
+        h.Name = "ENI_Cham"
+        h.Adornee = character
+        h.OutlineColor = ESP.Config.Color
+        h.OutlineTransparency = 0
+        h.FillColor = ESP.Config.Color
+        h.FillTransparency = ESP.Config.ChamsTransparency
+        h.DepthMode = depthMode()
+        h.Parent = character
+        v.highlight = h
+        v.highlightCharacter = character
+        return
+    end
+
+    local h = v.highlight
+    if h.FillColor ~= ESP.Config.Color then
+        h.FillColor = ESP.Config.Color
+        h.OutlineColor = ESP.Config.Color
+    end
+    if h.FillTransparency ~= ESP.Config.ChamsTransparency then
+        h.FillTransparency = ESP.Config.ChamsTransparency
+    end
+    local wantDepth = depthMode()
+    if h.DepthMode ~= wantDepth then h.DepthMode = wantDepth end
+end
+
+--// ── optional material tint on top of the cham ──────────────────
+local function clearTint(v)
+    for part, data in pairs(v.tintData) do
         if part and part.Parent then
             pcall(function()
                 part.Material = data.Material
@@ -379,12 +440,12 @@ local function clearChams(v)
             end)
         end
     end
-    for decal, transparency in pairs(v.chamDecals or {}) do
+    for decal, transparency in pairs(v.tintDecals) do
         if decal and decal.Parent then
             pcall(function() decal.Transparency = transparency end)
         end
     end
-    for appearance, data in pairs(v.chamAppearances or {}) do
+    for appearance, data in pairs(v.tintAppearances) do
         if appearance and appearance.Parent then
             pcall(function()
                 appearance.Color = data.Color
@@ -392,106 +453,76 @@ local function clearChams(v)
             end)
         end
     end
-    v.chamData = {}
-    v.chamDecals = {}
-    v.chamAppearances = {}
-    v.chamCharacter = nil
+    v.tintData = {}
+    v.tintDecals = {}
+    v.tintAppearances = {}
+    v.tintCharacter = nil
 end
 
-local function collectChamTargets(character)
-    local parts, decals, appearances = {}, {}, {}
-    for _, obj in ipairs(character:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            parts[#parts + 1] = obj
-        elseif obj:IsA("Decal") or obj:IsA("Texture") then
-            decals[#decals + 1] = obj
-        elseif obj:IsA("SurfaceAppearance") then
-            appearances[#appearances + 1] = obj
-        end
-    end
-    return parts, decals, appearances
-end
-
-local function applyChamMaterial(part, mat)
+local function applyTint(part, mat)
     part.Material = mat
     part.Color = ESP.Config.Color
     part.Transparency = ESP.Config.ChamsTransparency
-    --// LTM composes on top of Transparency, so it must be cleared or the
-    --// part stays see-through regardless of the slider
     part.LocalTransparencyModifier = 0
 end
 
-local function syncChams(v, character, enabled)
-    v.chamDecals = v.chamDecals or {}
-    v.chamAppearances = v.chamAppearances or {}
+local function syncTint(v, character, enabled)
+    if not enabled then
+        if next(v.tintData) or next(v.tintDecals) or next(v.tintAppearances) then
+            clearTint(v)
+        end
+        return
+    end
 
-    if v.chamCharacter ~= character then
-        clearChams(v)
-        if enabled and character then
-            v.chamCharacter = character
-            local mat = Enum.Material[ESP.Config.ChamsMaterial] or Enum.Material.Neon
-            local parts, decals, appearances = collectChamTargets(character)
+    if v.tintCharacter ~= character then
+        clearTint(v)
+        v.tintCharacter = character
+        local mat = Enum.Material[ESP.Config.TintMaterial] or Enum.Material.Neon
 
-            for _, part in ipairs(parts) do
-                v.chamData[part] = {
-                    Material = part.Material,
-                    Color = part.Color,
-                    Transparency = part.Transparency,
-                    LocalTransparencyModifier = part.LocalTransparencyModifier,
+        for _, obj in ipairs(character:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                v.tintData[obj] = {
+                    Material = obj.Material,
+                    Color = obj.Color,
+                    Transparency = obj.Transparency,
+                    LocalTransparencyModifier = obj.LocalTransparencyModifier,
                 }
-                applyChamMaterial(part, mat)
-            end
-
-            --// SurfaceAppearance overrides Material/Color, so tint it too
-            for _, appearance in ipairs(appearances) do
-                v.chamAppearances[appearance] = {
-                    Color = appearance.Color,
-                    Transparency = appearance.Transparency,
+                applyTint(obj, mat)
+            elseif obj:IsA("SurfaceAppearance") then
+                v.tintAppearances[obj] = {
+                    Color = obj.Color,
+                    Transparency = obj.Transparency,
                 }
                 pcall(function()
-                    appearance.Color = ESP.Config.Color
-                    appearance.Transparency = 0
+                    obj.Color = ESP.Config.Color
+                    obj.Transparency = 0
                 end)
-            end
-
-            --// faces / textures sit on top of the body, hide them for clean chams
-            for _, decal in ipairs(decals) do
-                v.chamDecals[decal] = decal.Transparency
-                pcall(function() decal.Transparency = 1 end)
+            elseif obj:IsA("Decal") or obj:IsA("Texture") then
+                v.tintDecals[obj] = obj.Transparency
+                pcall(function() obj.Transparency = 1 end)
             end
         end
         return
     end
 
-    if not enabled then
-        if next(v.chamData) or next(v.chamDecals) or next(v.chamAppearances) then
-            clearChams(v)
-        end
-        return
-    end
-
-    local mat = Enum.Material[ESP.Config.ChamsMaterial] or Enum.Material.Neon
-    for part in pairs(v.chamData) do
+    local mat = Enum.Material[ESP.Config.TintMaterial] or Enum.Material.Neon
+    for part in pairs(v.tintData) do
         if part.Parent then
             if part.Material ~= mat
                 or part.Color ~= ESP.Config.Color
                 or part.Transparency ~= ESP.Config.ChamsTransparency
                 or part.LocalTransparencyModifier ~= 0 then
-                applyChamMaterial(part, mat)
+                applyTint(part, mat)
             end
         else
-            v.chamData[part] = nil
+            v.tintData[part] = nil
         end
     end
-    for appearance in pairs(v.chamAppearances) do
-        if not appearance.Parent then
-            v.chamAppearances[appearance] = nil
-        end
+    for appearance in pairs(v.tintAppearances) do
+        if not appearance.Parent then v.tintAppearances[appearance] = nil end
     end
-    for decal in pairs(v.chamDecals) do
-        if not decal.Parent then
-            v.chamDecals[decal] = nil
-        end
+    for decal in pairs(v.tintDecals) do
+        if not decal.Parent then v.tintDecals[decal] = nil end
     end
 end
 
@@ -509,7 +540,8 @@ local function step()
             if v.fill then v.fill.Visible = false end
             if v.billboard then v.billboard.Enabled = false; v.billboard.Adornee = nil end
             if v.tracer then v.tracer.Enabled = false end
-            if next(v.chamData) then clearChams(v) end
+            if v.highlight then destroyHighlight(v) end
+            if next(v.tintData) then clearTint(v) end
         end
         return
     end
@@ -603,8 +635,11 @@ local function step()
                     end
                 end
 
-                local okChams, chamsErr = pcall(syncChams, v, character, cfg.Chams)
-                if not okChams then dbgError("syncChams", chamsErr) end
+                local okHighlight, highlightErr = pcall(syncHighlight, v, character, cfg.Chams)
+                if not okHighlight then dbgError("syncHighlight", highlightErr) end
+
+                local okTint, tintErr = pcall(syncTint, v, character, cfg.Tint)
+                if not okTint then dbgError("syncTint", tintErr) end
 
                 v.billboard.Adornee = head
 
@@ -665,7 +700,8 @@ local function step()
             else
                 if v.box then v.box.Visible = false end
                 if v.fill then v.fill.Visible = false end
-                if next(v.chamData) then clearChams(v) end
+                if v.highlight then destroyHighlight(v) end
+                if next(v.tintData) then clearTint(v) end
                 v.billboard.Enabled = false
                 v.tracer.Enabled = false
             end
@@ -716,10 +752,14 @@ function ESP.SetColor(c)
         v.label.TextColor3 = c
         if v.box then v.box.Color = c end
         if v.fill then v.fill.Color = c end
+        if v.highlight then
+            v.highlight.FillColor = c
+            v.highlight.OutlineColor = c
+        end
     end
 end
 
-local CHAM_MATERIALS = {
+local TINT_MATERIALS = {
     "Neon", "ForceField", "Glass", "SmoothPlastic", "Metal", "Plastic",
     "Marble", "Granite", "Foil", "Ice", "DiamondPlate", "CorrodedMetal",
 }
@@ -755,11 +795,15 @@ function ESP:Init(Gui)
             y = g:CreateToggle("Debug", ESP.Config.Debug, function(s) ESP.Config.Debug = s end, y)
 
             y = g:CreateSection("Chams", y + 10)
-            y = g:CreateDropdown("Material", CHAM_MATERIALS, ESP.Config.ChamsMaterial, function(v)
-                ESP.Config.ChamsMaterial = v
-            end, y)
-            y = g:CreateSlider("Chams Transparency", 0, 90, math.floor(ESP.Config.ChamsTransparency * 100), function(v)
+            y = g:CreateSlider("Cham Transparency", 0, 90, math.floor(ESP.Config.ChamsTransparency * 100), function(v)
                 ESP.Config.ChamsTransparency = v / 100
+            end, y)
+            y = g:CreateDropdown("Cham Depth", { "Always on top", "Occluded" }, ESP.Config.ChamsDepth, function(v)
+                ESP.Config.ChamsDepth = v
+            end, y)
+            y = g:CreateToggle("Material Tint", ESP.Config.Tint, function(s) ESP.Config.Tint = s end, y)
+            y = g:CreateDropdown("Tint Material", TINT_MATERIALS, ESP.Config.TintMaterial, function(v)
+                ESP.Config.TintMaterial = v
             end, y)
 
             y = g:CreateSection("ESP Color", y + 10)
