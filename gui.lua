@@ -10,7 +10,10 @@ local Player = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 --// Background image (content panel only)
-local BACKGROUND_IMAGE = "https://files.catbox.moe/60cyzp.png"
+-- Roblox cannot load raw https:// in an ImageLabel, so the bytes are downloaded,
+-- cached to disk and served through getcustomasset.
+local BACKGROUND_IMAGE_URL = "https://files.catbox.moe/60cyzp.png"
+local ASSET_DIR = "blackout_assets"
 
 --// Colors — Huohuo (green) palette
 local BLACK      = Color3.fromRGB(8, 14, 12)
@@ -62,6 +65,73 @@ local WAVE_DURATION     = 2.7
 local WAVE_PAUSE        = 1.1
 local WAVE_ROTATION     = -45
 
+--// ── Image pipeline ──────────────────────────────────────────────
+local function HashString(str)
+    local h = 5381
+    for i = 1, #str do
+        h = (h * 33 + string.byte(str, i)) % 4294967296
+    end
+    return string.format("%x", h)
+end
+
+local function HttpGetBody(url)
+    local body
+    local ok = pcall(function()
+        local req = (syn and syn.request) or request or http_request
+        if req then
+            local res = req({ Url = url, Method = "GET" })
+            if res and (res.StatusCode == nil or res.StatusCode < 400) then
+                body = res.Body
+            end
+        else
+            body = game:HttpGet(url)
+        end
+    end)
+    if not ok or type(body) ~= "string" then return nil end
+    return body
+end
+
+local function LoadRemoteImage(url)
+    if type(url) ~= "string" or url == "" then return nil end
+    if not (writefile and getcustomasset) then return nil end
+
+    if makefolder then pcall(makefolder, ASSET_DIR) end
+
+    local key = HashString(url)
+    local path = ASSET_DIR .. "/bg_" .. key .. ".png"
+
+    if isfile then
+        local okExists, exists = pcall(isfile, path)
+        if okExists and exists then
+            local okAsset, asset = pcall(getcustomasset, path)
+            if okAsset and type(asset) == "string" and asset ~= "" then
+                return asset
+            end
+        end
+    end
+
+    local body = HttpGetBody(url)
+    if not body or #body < 64 then return nil end
+
+    local magic = string.sub(body, 1, 4)
+    if magic == "\137PNG" then
+        path = ASSET_DIR .. "/bg_" .. key .. ".png"
+    elseif string.sub(body, 1, 3) == "\255\216\255" then
+        path = ASSET_DIR .. "/bg_" .. key .. ".jpg"
+    else
+        return nil
+    end
+
+    local okWrite = pcall(writefile, path, body)
+    if not okWrite then return nil end
+
+    local okAsset, asset = pcall(getcustomasset, path)
+    if okAsset and type(asset) == "string" and asset ~= "" then
+        return asset
+    end
+    return nil
+end
+
 --// State
 local ToggleKey = Enum.KeyCode.RightShift
 local WaitingForKey = false
@@ -112,8 +182,10 @@ local function StartMouseUnlockLoop()
 end
 StartMouseUnlockLoop()
 
---// Toggle state storage
+--// State storage
 Gui.ToggleStates = {}
+Gui.ModeStates = {}
+Gui.ActiveHolds = {}
 
 local function ApplySelectedGradient(button, enabled)
     if not button then return end
@@ -131,6 +203,23 @@ end
 function Gui:SetToggleState(tabName, label, state)
     local toggleKey = tabName .. "_" .. label
     self.ToggleStates[toggleKey] = state
+end
+
+function Gui:GetToggleMode(tabName, label)
+    local toggleKey = tabName .. "_" .. label
+    return self.ModeStates[toggleKey] or "Toggle"
+end
+
+function Gui:SetToggleMode(tabName, label, mode)
+    local toggleKey = tabName .. "_" .. label
+    self.ModeStates[toggleKey] = mode
+end
+
+--// Every registered momentary control gets released here
+function Gui:ReleaseAllHolds()
+    for btn, entry in pairs(self.ActiveHolds) do
+        if entry and entry.Release then entry.Release() end
+    end
 end
 
 function Gui:Init()
@@ -320,9 +409,10 @@ function Gui:Init()
     ContentBg.BackgroundColor3 = BACKGROUND
     ContentBg.BackgroundTransparency = 1
     ContentBg.BorderSizePixel = 0
-    ContentBg.Image = BACKGROUND_IMAGE
-    ContentBg.ImageTransparency = 0.08
+    ContentBg.Image = ""
+    ContentBg.ImageTransparency = 0.05
     ContentBg.ScaleType = Enum.ScaleType.Crop
+    ContentBg.Visible = false
     ContentBg.ZIndex = 2
     ContentBg.Parent = Main
 
@@ -349,6 +439,14 @@ function Gui:Init()
     ContentBgStroke.Thickness = 1
     ContentBgStroke.Transparency = 0.35
     ContentBgStroke.Parent = ContentBg
+
+    task.spawn(function()
+        local asset = LoadRemoteImage(BACKGROUND_IMAGE_URL)
+        if asset and ContentBg.Parent then
+            ContentBg.Image = asset
+            ContentBg.Visible = true
+        end
+    end)
 
     local ContentTitle = Instance.new("TextLabel")
     ContentTitle.Size = UDim2.new(1, 0, 0, 28)
@@ -403,6 +501,14 @@ function Gui:Init()
         )
     end)
 
+    --// Single global release sweep for every momentary control
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            self:ReleaseAllHolds()
+        end
+    end)
+
     self.ScreenGui = ScreenGui
     self.Main = Main
     self.Top = Top
@@ -453,6 +559,7 @@ function Gui:HideMenu()
     if Animating or not MenuOpen then return end
     Animating = true
     MenuOpen = false
+    self:ReleaseAllHolds()
     self.SavedPosition = self.Main.Position
 
     local closeSize = UDim2.fromOffset(self.OriginalSize.X.Offset - 60, self.OriginalSize.Y.Offset - 40)
@@ -605,6 +712,8 @@ function Gui:SwitchTab(name)
     self.ContentSubtitle.Text = self:GetTabDescription(name) or ""
     self.ContentSubtitle.TextColor3 = Tint(accent, 0.55)
 
+    self:ReleaseAllHolds()
+
     for _, child in ipairs(self.Content:GetChildren()) do
         if child ~= self.ContentTitle and child ~= self.ContentSubtitle then
             child:Destroy()
@@ -684,14 +793,22 @@ function Gui:CreateSection(text, y)
     return y + 40
 end
 
+--// ═══════════════════════════════════════════════════════════════
+--//  TOGGLE  (with per-entry Toggle / Hold mode dropdown)
+--// ═══════════════════════════════════════════════════════════════
+local TOGGLE_MODES = { "Toggle", "Hold" }
+
 function Gui:CreateToggle(label, default, callback, y)
     local accent = self.CurrentAccent or DEFAULT_ACCENT
     local toggleKey = self.CurrentTab .. "_" .. label
     local savedState = self.ToggleStates[toggleKey]
     local State = savedState ~= nil and savedState or default
+    local Mode = self.ModeStates[toggleKey] or "Toggle"
+
+    local BLOCK_H = 76
 
     local ToggleFrame = Instance.new("Frame")
-    ToggleFrame.Size = UDim2.new(1, 0, 0, 36)
+    ToggleFrame.Size = UDim2.new(1, 0, 0, BLOCK_H)
     ToggleFrame.Position = UDim2.fromOffset(0, y)
     ToggleFrame.BackgroundTransparency = 1
     ToggleFrame.ZIndex = 3
@@ -713,7 +830,7 @@ function Gui:CreateToggle(label, default, callback, y)
     ToggleBtn.Position = UDim2.new(1, -70, 0, 5)
     ToggleBtn.BackgroundColor3 = State and accent or DARK_PANEL
     ToggleBtn.BorderSizePixel = 0
-    ToggleBtn.Text = State and "ON" or "OFF"
+    ToggleBtn.Text = State and "ON" or (Mode == "Hold" and "HOLD" or "OFF")
     ToggleBtn.TextColor3 = State and BLACK or GRAY
     ToggleBtn.TextSize = 10
     ToggleBtn.Font = Enum.Font.GothamBold
@@ -726,26 +843,202 @@ function Gui:CreateToggle(label, default, callback, y)
     ToggleStroke.Thickness = 1
     ToggleStroke.Parent = ToggleBtn
 
+    --// Mode row
+    local ModeCaption = Instance.new("TextLabel")
+    ModeCaption.Size = UDim2.new(1, -110, 0, 22)
+    ModeCaption.Position = UDim2.fromOffset(0, 40)
+    ModeCaption.BackgroundTransparency = 1
+    ModeCaption.Text = "Activation mode"
+    ModeCaption.TextColor3 = Shade(Tint(accent, 0.5), 0.35)
+    ModeCaption.TextSize = 10
+    ModeCaption.Font = Enum.Font.Gotham
+    ModeCaption.TextXAlignment = Enum.TextXAlignment.Left
+    ModeCaption.ZIndex = 4
+    ModeCaption.Parent = ToggleFrame
+
+    local ModeChip = Instance.new("TextButton")
+    ModeChip.Name = "ModeChip"
+    ModeChip.Size = UDim2.fromOffset(84, 22)
+    ModeChip.Position = UDim2.new(1, -84, 0, 40)
+    ModeChip.BackgroundColor3 = DARK_PANEL
+    ModeChip.BorderSizePixel = 0
+    ModeChip.Text = Mode .. "  ▾"
+    ModeChip.TextColor3 = Tint(accent, 0.3)
+    ModeChip.TextSize = 10
+    ModeChip.Font = Enum.Font.GothamBold
+    ModeChip.AutoButtonColor = false
+    ModeChip.ZIndex = 4
+    ModeChip.Parent = ToggleFrame
+
+    local ModeStroke = Instance.new("UIStroke")
+    ModeStroke.Color = Shade(accent, 0.6)
+    ModeStroke.Thickness = 1
+    ModeStroke.Parent = ModeChip
+
+    --// Mode popup
+    local ModePopup = Instance.new("Frame")
+    ModePopup.Name = "ModePopup"
+    ModePopup.Size = UDim2.fromOffset(84, #TOGGLE_MODES * 24 + 4)
+    ModePopup.BackgroundColor3 = Color3.fromRGB(13, 22, 18)
+    ModePopup.BorderSizePixel = 0
+    ModePopup.Visible = false
+    ModePopup.ZIndex = 100
+    ModePopup.Parent = self.ScreenGui
+
+    local ModePopupStroke = Instance.new("UIStroke")
+    ModePopupStroke.Color = accent
+    ModePopupStroke.Thickness = 1.5
+    ModePopupStroke.Parent = ModePopup
+
+    local held = false
+
+    local function Draw()
+        local on = State and true or false
+        ToggleBtn.BackgroundColor3 = on and accent or DARK_PANEL
+        ToggleBtn.TextColor3 = on and BLACK or GRAY
+        ToggleBtn.Text = on and "ON" or (Mode == "Hold" and "HOLD" or "OFF")
+        ToggleStroke.Color = on and accent or Shade(accent, 0.6)
+    end
+
+    local function Press()
+        if Mode ~= "Hold" or held then return end
+        held = true
+        State = true
+        self.ToggleStates[toggleKey] = true
+        Draw()
+        if callback then task.spawn(function() pcall(callback, true) end) end
+    end
+
+    local function Release()
+        if Mode ~= "Hold" or not held then return end
+        held = false
+        State = false
+        self.ToggleStates[toggleKey] = false
+        Draw()
+        if callback then task.spawn(function() pcall(callback, false) end) end
+    end
+
+    self.ActiveHolds[ToggleBtn] = { Release = Release }
+
+    local function SetMode(newMode)
+        if Mode == newMode then return end
+        Release()
+        Mode = newMode
+        self.ModeStates[toggleKey] = newMode
+        ModeChip.Text = Mode .. "  ▾"
+        if Mode == "Hold" then
+            State = false
+            self.ToggleStates[toggleKey] = false
+            if callback then task.spawn(function() pcall(callback, false) end) end
+        end
+        Draw()
+        for _, child in ipairs(ModePopup:GetChildren()) do
+            if child:IsA("TextButton") then
+                child.TextColor3 = (child:GetAttribute("ModeValue") == Mode) and accent or LIGHT
+            end
+        end
+    end
+
+    for i, modeName in ipairs(TOGGLE_MODES) do
+        local OptBtn = Instance.new("TextButton")
+        OptBtn.Size = UDim2.new(1, -4, 0, 22)
+        OptBtn.Position = UDim2.fromOffset(2, 2 + (i - 1) * 24)
+        OptBtn.BackgroundColor3 = Color3.fromRGB(13, 22, 18)
+        OptBtn.BorderSizePixel = 0
+        OptBtn.Text = "  " .. modeName
+        OptBtn.TextColor3 = modeName == Mode and accent or LIGHT
+        OptBtn.TextSize = 10
+        OptBtn.Font = Enum.Font.GothamBold
+        OptBtn.TextXAlignment = Enum.TextXAlignment.Left
+        OptBtn.AutoButtonColor = false
+        OptBtn.ZIndex = 101
+        OptBtn.Parent = ModePopup
+        OptBtn:SetAttribute("ModeValue", modeName)
+
+        OptBtn.MouseEnter:Connect(function()
+            OptBtn.BackgroundColor3 = Shade(accent, 0.8)
+        end)
+        OptBtn.MouseLeave:Connect(function()
+            OptBtn.BackgroundColor3 = Color3.fromRGB(13, 22, 18)
+        end)
+        OptBtn.MouseButton1Click:Connect(function()
+            SetMode(modeName)
+            ModePopup.Visible = false
+        end)
+    end
+
+    ModeChip.MouseEnter:Connect(function()
+        ModeChip.BackgroundColor3 = Shade(accent, 0.82)
+        ModeStroke.Color = accent
+    end)
+    ModeChip.MouseLeave:Connect(function()
+        ModeChip.BackgroundColor3 = DARK_PANEL
+        ModeStroke.Color = Shade(accent, 0.6)
+    end)
+    ModeChip.MouseButton1Click:Connect(function()
+        if ModePopup.Visible then
+            ModePopup.Visible = false
+        else
+            local absPos = ModeChip.AbsolutePosition
+            local absSize = ModeChip.AbsoluteSize
+            ModePopup.Position = UDim2.fromOffset(absPos.X, absPos.Y + absSize.Y + 2)
+            ModePopup.Visible = true
+        end
+    end)
+
+    UserInputService.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 and ModePopup.Visible then
+            local mousePos = Vector2.new(input.Position.X, input.Position.Y)
+            local pPos = ModePopup.AbsolutePosition
+            local pSize = ModePopup.AbsoluteSize
+            local cPos = ModeChip.AbsolutePosition
+            local cSize = ModeChip.AbsoluteSize
+
+            local inPopup = mousePos.X >= pPos.X and mousePos.X <= pPos.X + pSize.X and
+                            mousePos.Y >= pPos.Y and mousePos.Y <= pPos.Y + pSize.Y
+            local inChip = mousePos.X >= cPos.X and mousePos.X <= cPos.X + cSize.X and
+                           mousePos.Y >= cPos.Y and mousePos.Y <= cPos.Y + cSize.Y
+
+            if not inPopup and not inChip then
+                ModePopup.Visible = false
+            end
+        end
+    end)
+
     ToggleBtn.MouseEnter:Connect(function()
+        if Mode == "Hold" and held then return end
         ToggleBtn.BackgroundColor3 = State and Tint(accent, 0.35) or Shade(accent, 0.82)
-        ApplySelectedGradient(ToggleBtn, State)
     end)
     ToggleBtn.MouseLeave:Connect(function()
+        if Mode == "Hold" and held then return end
         ToggleBtn.BackgroundColor3 = State and accent or DARK_PANEL
-        ApplySelectedGradient(ToggleBtn, State)
+    end)
+    ToggleBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            Press()
+        end
+    end)
+    ToggleBtn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            Release()
+        end
     end)
     ToggleBtn.MouseButton1Click:Connect(function()
+        if Mode ~= "Toggle" then return end
         State = not State
         self.ToggleStates[toggleKey] = State
-        ToggleBtn.BackgroundColor3 = State and accent or DARK_PANEL
-        ToggleBtn.TextColor3 = State and BLACK or GRAY
-        ToggleBtn.Text = State and "ON" or "OFF"
-        ToggleStroke.Color = State and accent or Shade(accent, 0.6)
-        ApplySelectedGradient(ToggleBtn, State)
+        Draw()
         if callback then callback(State) end
     end)
 
-    return y + 42
+    ToggleBtn.Destroying:Connect(function()
+        self.ActiveHolds[ToggleBtn] = nil
+        ModePopup:Destroy()
+    end)
+
+    return y + BLOCK_H + 2
 end
 
 function Gui:CreateSlider(label, min, max, default, callback, y)
@@ -1282,6 +1575,91 @@ function Gui:CreateButton(label, callback, y)
         BtnStroke.Color = Shade(accent, 0.6)
     end)
     Btn.MouseButton1Click:Connect(function() if callback then callback() end end)
+
+    return y + 40
+end
+
+--// ── Standalone hold button ──────────────────────────────────────
+-- Momentary control: callback(true) while pressed, callback(false) on release.
+function Gui:CreateHoldButton(label, callback, y, options)
+    options = options or {}
+    local accent = self.CurrentAccent or DEFAULT_ACCENT
+    local holdText = options.HoldText or "HOLDING"
+
+    local Btn = Instance.new("TextButton")
+    Btn.Name = options.Name or (label:gsub("%s+", ""))
+    Btn.Size = UDim2.new(1, 0, 0, 34)
+    Btn.Position = UDim2.fromOffset(0, y)
+    Btn.BackgroundColor3 = DARK_PANEL
+    Btn.BorderSizePixel = 0
+    Btn.Text = label
+    Btn.TextColor3 = Tint(accent, 0.5)
+    Btn.TextSize = 12
+    Btn.Font = Enum.Font.GothamBold
+    Btn.AutoButtonColor = false
+    Btn.ZIndex = 3
+    Btn.Parent = self.Content
+
+    local BtnStroke = Instance.new("UIStroke")
+    BtnStroke.Color = Shade(accent, 0.6)
+    BtnStroke.Thickness = 1
+    BtnStroke.Parent = Btn
+
+    local Fill = Instance.new("Frame")
+    Fill.Size = UDim2.fromScale(0, 1)
+    Fill.BackgroundColor3 = accent
+    Fill.BackgroundTransparency = 0.7
+    Fill.BorderSizePixel = 0
+    Fill.ZIndex = 3
+    Fill.Parent = Btn
+
+    local held = false
+
+    local function Idle()
+        Btn.BackgroundColor3 = DARK_PANEL
+        Btn.TextColor3 = Tint(accent, 0.5)
+        BtnStroke.Color = Shade(accent, 0.6)
+        Btn.Text = label
+        Fill.Size = UDim2.fromScale(0, 1)
+    end
+
+    local function Press()
+        if held or not Btn.Parent then return end
+        held = true
+        Btn.BackgroundColor3 = accent
+        Btn.TextColor3 = BLACK
+        BtnStroke.Color = Tint(accent, 0.4)
+        Btn.Text = holdText
+        Fill.Size = UDim2.fromScale(1, 1)
+        if callback then task.spawn(function() pcall(callback, true) end) end
+    end
+
+    local function Release()
+        if not held then return end
+        held = false
+        Idle()
+        if callback then task.spawn(function() pcall(callback, false) end) end
+    end
+
+    self.ActiveHolds[Btn] = { Release = Release }
+
+    Btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            Press()
+        end
+    end)
+    Btn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            Release()
+        end
+    end)
+    Btn.MouseLeave:Connect(Release)
+    Btn.Destroying:Connect(function()
+        held = false
+        self.ActiveHolds[Btn] = nil
+    end)
 
     return y + 40
 end
