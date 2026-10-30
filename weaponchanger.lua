@@ -123,8 +123,6 @@ local function CreateCustomViewmodel()
             end
         end
     end
-
-    print("[ENI] Custom viewmodel created from: " .. vm.Name)
 end
 
 local function StartWatcher()
@@ -221,7 +219,6 @@ function ViewmodelCustomizer:Init(Gui)
         g.Content = originalContent
     end)
 
-    print("[ENI] Viewmodel Customizer loaded")
     return self
 end
 
